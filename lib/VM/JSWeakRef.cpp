@@ -17,8 +17,7 @@ const ObjectVTable JSWeakRef::vt{
     VTable(
         CellKind::JSWeakRefKind,
         cellSize<JSWeakRef>(),
-        nullptr,
-        JSWeakRef::_markWeakImpl,
+        JSWeakRef::_finalizeImpl,
         nullptr,
         nullptr
 #ifdef HERMES_MEMORY_INSTRUMENTATION
@@ -44,19 +43,15 @@ void JSWeakRefBuildMeta(const GCCell *cell, Metadata::Builder &mb) {
   mb.setVTable(&JSWeakRef::vt);
 }
 
-void JSWeakRef::_markWeakImpl(GCCell *cell, WeakRefAcceptor &acceptor) {
-  auto *self = vmcast<JSWeakRef>(cell);
-  if (self->ref_.unsafeGetSlot()) {
-    acceptor.accept(self->ref_);
-  }
-}
-
 #ifdef HERMES_MEMORY_INSTRUMENTATION
 void JSWeakRef::_snapshotAddEdgesImpl(
     GCCell *cell,
     GC &gc,
     HeapSnapshot &snap) {
   auto *const self = vmcast<JSWeakRef>(cell);
+  // Filter out empty refs from adding edges.
+  if (!self->ref_.isValid())
+    return;
   snap.addNamedEdge(
       HeapSnapshot::EdgeType::Weak,
       "weak",
@@ -64,10 +59,16 @@ void JSWeakRef::_snapshotAddEdgesImpl(
 }
 #endif
 
+void JSWeakRef::_finalizeImpl(GCCell *cell, GC &) {
+  auto *self = vmcast<JSWeakRef>(cell);
+  if (!self->ref_.isEmpty())
+    self->ref_.releaseSlot();
+}
+
 PseudoHandle<JSWeakRef> JSWeakRef::create(
     Runtime &runtime,
     Handle<JSObject> parentHandle) {
-  auto *cell = runtime.makeAFixed<JSWeakRef>(
+  auto *cell = runtime.makeAFixed<JSWeakRef, HasFinalizer::Yes>(
       runtime,
       parentHandle,
       runtime.getHiddenClassForPrototype(
@@ -76,8 +77,7 @@ PseudoHandle<JSWeakRef> JSWeakRef::create(
 }
 
 void JSWeakRef::setTarget(Runtime &runtime, Handle<JSObject> target) {
-  WeakRefLock lk{runtime.getHeap().weakRefMutex()};
-  assert(!ref_.unsafeGetSlot() && "Should not call setTarget multiple times");
+  assert(ref_.isEmpty() && "Should not call setTarget multiple times");
   ref_ = WeakRef<JSObject>(runtime, target);
 }
 

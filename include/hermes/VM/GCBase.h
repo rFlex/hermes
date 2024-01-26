@@ -777,6 +777,7 @@ class GCBase {
     assert(
         weakMapEntrySlots_.sizeForTests() == 0 &&
         "weakMapEntrySlots_ must all be freed");
+    assert(weakSlots_.sizeForTests() == 0 && "weakSlots_ must all be freed");
   }
 
   /// Create a fixed size object of type T.
@@ -1082,12 +1083,6 @@ class GCBase {
       SlotVisitorWithNames<Acceptor> &visitor,
       GCCell *cell);
 
-  /// \return A reference to the mutex that controls accessing any WeakRef.
-  ///   This mutex must be held if a WeakRef is created or modified.
-  WeakRefMutex &weakRefMutex() {
-    return weakRefMutex_;
-  }
-
   /// @}
 
   /// If false, all reachable objects in the heap will have a dereference-able
@@ -1224,19 +1219,12 @@ class GCBase {
   void markWeakRoots(WeakRootAcceptor &acceptor, bool markLongLived) {
     gcCallbacks_.markWeakRoots(acceptor, markLongLived);
     acceptor.beginRootSection(RootAcceptor::Section::WeakRefSlots);
-    for (auto &slot : weakSlots_) {
-      slot.markWeakRoots(acceptor);
-    }
+    weakSlots_.forEach(
+        [&acceptor](WeakRefSlot &slot) { slot.markWeakRoots(acceptor); });
 
     weakMapEntrySlots_.forEach(
         [&acceptor](WeakMapEntrySlot &slot) { slot.markWeakRoots(acceptor); });
     acceptor.endRootSection();
-  }
-
-  /// Frees the weak slot, so it can be re-used by future WeakRef allocations.
-  void freeWeakSlot(WeakRefSlot *slot) {
-    slot->free(firstFreeWeak_);
-    firstFreeWeak_ = slot;
   }
 
   /// Print the cumulative statistics.
@@ -1262,39 +1250,6 @@ class GCBase {
   virtual void oomDetail(
       llvh::MutableArrayRef<char> detailBuffer,
       std::error_code reason);
-
-  /// If a cell has any weak references to mark, and the acceptor supports
-  /// marking them, mark those weak references.
-  template <typename Acceptor>
-  void markWeakRefsIfNecessary(GCCell *cell, CellKind kind, Acceptor &acceptor);
-
-  /// Overload of \p markWeakRefsIfNecessary for acceptors that support marking
-  /// weak references.
-  /// Don't call this directly, use the three-argument variant instead.
-  template <typename Acceptor>
-  void markWeakRefsIfNecessary(
-      GCCell *cell,
-      CellKind kind,
-      Acceptor &acceptor,
-      std::true_type) {
-    // In C++17, we could implement this via "constexpr if" rather than
-    // overloads with std::true_type.
-    // Once C++17 is available, switch to using that.
-    if (auto *cb = VTable::getVTable(kind)->getMarkWeakCallback()) {
-      std::lock_guard<Mutex> wrLk{weakRefMutex()};
-      cb(cell, acceptor);
-    }
-  }
-
-  /// Overload of \p markWeakRefsIfNecessary for acceptors that do not support
-  /// marking weak references.
-  /// Don't call this directly, use the three-argument variant instead.
-  template <typename Acceptor>
-  static void markWeakRefsIfNecessary(
-      GCCell *,
-      CellKind kind,
-      Acceptor &,
-      std::false_type) {}
 
   template <typename T, class... Args>
   static T *constructCell(void *ptr, uint32_t size, Args &&...args) {
@@ -1393,23 +1348,12 @@ class GCBase {
   /// weakSlots_ is a list of all the weak pointers in the system. They are
   /// invalidated if they point to an object that is dead, and do not count
   /// towards whether an object is live or dead.
-  /// The state enum of a WeakRefSlot that is not free may be modified
-  /// concurrently, those values are protected by the weakRefMutex_.
-  std::deque<WeakRefSlot> weakSlots_;
+  ManagedChunkedList<WeakRefSlot> weakSlots_;
 
   /// A list of all slots used by WeakMap/WeakSet. They are freed by the mutator
   /// when operating on a WeakMap/WeakSet, or in the finalizer during sweeping.
   /// In collection phase, GC visits each non-free slot to update their values.
   ManagedChunkedList<WeakMapEntrySlot> weakMapEntrySlots_;
-
-  /// Pointer to the first free weak reference slot. Free weak refs are chained
-  /// together in a linked list.
-  WeakRefSlot *firstFreeWeak_{nullptr};
-
-  /// Any thread that modifies a WeakRefSlot or a data structure containing
-  /// WeakRefs that the GC will mark must hold this mutex. The GC will hold this
-  /// mutex while scanning any weak references.
-  WeakRefMutex weakRefMutex_;
 
   /// Tracks what objects need a stable identity for features such as heap
   /// snapshots and the memory profiler.

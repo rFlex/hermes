@@ -1004,10 +1004,6 @@ class HadesGC final : public GCBase {
   /// Finalize all objects in YG that have finalizers.
   void finalizeYoungGenObjects();
 
-  /// Update all of the weak references, invalidate the ones that point to
-  /// dead objects, and free the ones that were not marked at all.
-  void updateWeakReferencesForOldGen();
-
   /// Return the total number of bytes that are in use by the JS heap.
   uint64_t allocatedBytes() const;
 
@@ -1111,11 +1107,6 @@ void *HadesGC::allocWork(uint32_t sz) {
       isSizeHeapAligned(sz) &&
       "Should be aligned before entering this function");
   assert(sz >= minAllocationSize() && "Allocating too small of an object");
-  if (kConcurrentGC) {
-    HERMES_SLOW_ASSERT(
-        !weakRefMutex() &&
-        "WeakRef mutex should not be held when alloc is called");
-  }
   if (shouldSanitizeHandles()) {
     // The best way to sanitize uses of raw pointers outside handles is to force
     // the entire heap to move, and ASAN poison the old heap. That is too

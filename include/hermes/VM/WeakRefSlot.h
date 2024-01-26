@@ -23,26 +23,11 @@ namespace vm {
 /// moved; if the object is garbage-collected, the pointer will be cleared.
 class WeakRefSlot {
  public:
-  /// State of this slot for the purpose of reusing slots.
-  enum State {
-    Unmarked = 0, /// Unknown whether this slot is in use by the mutator.
-    Marked, /// Proven to be in use by the mutator.
-    Free /// Proven to NOT be in use by the mutator.
-  };
-
   // Mutator methods.
-
-  WeakRefSlot(CompressedPointer ptr) {
-    reset(ptr);
-  }
 
   /// Return true if this slot stores a non-null pointer to something.
   bool hasValue() const {
-    // This assert should be predicated on kConcurrentGC being false, because it
-    // is not safe to access the state in a concurrent GC
-    assert(
-        (kConcurrentGC || (state_ != Free)) &&
-        "Should never query a free WeakRef");
+    assert(!isFree() && "Should never query a free WeakRef");
     return value_.root != CompressedPointer(nullptr);
   }
 
@@ -62,9 +47,8 @@ class WeakRefSlot {
   }
 
   void markWeakRoots(WeakRootAcceptor &acceptor) {
-    if (state_ != State::Free) {
-      acceptor.acceptWeak(value_.root);
-    }
+    assert(!isFree() && "Cannot mark the weak root of a freed slot.");
+    acceptor.acceptWeak(value_.root);
   }
 
   // GC methods to update slot when referent moves/dies.
@@ -80,55 +64,62 @@ class WeakRefSlot {
     value_.root = CompressedPointer(nullptr);
   }
 
-  // GC methods to recycle slots.
+  /// GC methods to recycle slots.
 
-  State state() const {
-    return state_;
+  /// Set the slot to free, this can be called from either the mutator (when
+  /// destroying a WeakRef) or the background thread (in finalizer).
+  void free() {
+    /// There are three operations related to this atomic variable:
+    /// 1. Freeing the slot on background thread.
+    /// 2. Checking if the slot is free on the mutator.
+    /// 3. Freeing and reusing the slot on the mutator.
+    /// Since the only operation that background thread can do with the slot is
+    /// freeing it, we don't need a barrier to order the store.
+    free_.store(true, std::memory_order_relaxed);
   }
 
-  void mark() {
-    assert(state() != Free && "Cannot mark a free slot.");
-    state_ = Marked;
+  /// Methods required by ManagedChunkedList.
+
+  WeakRefSlot() = default;
+
+  /// \return true if the slot has been freed. As noted in free(), since
+  /// background thread can only free a slot, we don't need a stricter order.
+  bool isFree() const {
+    return free_.load(std::memory_order_relaxed);
   }
 
-  void unmark() {
-    assert(state() == Marked && "not yet marked");
-    state_ = Unmarked;
-  }
-
-  void free(WeakRefSlot *nextFree) {
-    assert(state() == Unmarked && "cannot free a reachable slot");
-    state_ = Free;
-    value_.nextFree = nextFree;
-    assert(state() == Free);
-  }
-
-  WeakRefSlot *nextFree() const {
-    // nextFree is only called during a STW pause, so it's fine to access both
-    // state and value here.
-    assert(state() == Free);
+  WeakRefSlot *getNextFree() {
+    assert(isFree() && "Can only get nextFree on a free slot");
     return value_.nextFree;
   }
 
-  /// Re-initialize a freed slot.
-  void reset(CompressedPointer ptr) {
-    state_ = Marked;
+  void setNextFree(WeakRefSlot *nextFree) {
+    assert(isFree() && "can only set nextFree on a free slot");
+    value_.nextFree = nextFree;
+  }
+
+  /// Emplace new value to this slot.
+  void emplace(CompressedPointer ptr) {
+    assert(isFree() && "Slot must be free.");
     value_.root = ptr;
+    free_.store(false, std::memory_order_relaxed);
   }
 
  private:
-  // value_ and state_ are read and written by different threads. We rely on
-  // them being independent words so that they can be used without
-  // synchronization.
+  /// When the slot is not free, root points to the referenced object, and is
+  /// updated by GC when it moves/dies (which happens either on the mutator or
+  /// background thread at the STW phase). When it's freed, nextFree is set to
+  /// another freed slot and added to a freelist for reuse (currently this is
+  /// delegated to ManagedChunkedList).
   union WeakRootOrIndex {
     WeakRoot<GCCell> root;
     WeakRefSlot *nextFree;
     WeakRootOrIndex() {}
   } value_;
-  State state_;
+  /// Atomic state represents whether the slot is free. It can be written by
+  /// background thread (in finalizer) and read/written by mutator.
+  std::atomic<bool> free_{true};
 };
-
-using WeakSlotState = WeakRefSlot::State;
 
 class JSObject;
 class JSWeakMapImplBase;

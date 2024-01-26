@@ -694,8 +694,7 @@ class MarkWorklist {
   llvh::SmallVector<GCCell *, 0> worklist_;
 };
 
-class HadesGC::MarkAcceptor final : public RootAndSlotAcceptor,
-                                    public WeakRefAcceptor {
+class HadesGC::MarkAcceptor final : public RootAndSlotAcceptor {
  public:
   MarkAcceptor(HadesGC &gc)
       : gc{gc},
@@ -802,17 +801,6 @@ class HadesGC::MarkAcceptor final : public RootAndSlotAcceptor,
       return;
     }
     writeBarrierMarkedSymbols_[idx] = true;
-  }
-
-  void accept(WeakRefBase &wr) override {
-    assert(
-        gc.weakRefMutex() &&
-        "Must hold weak ref mutex when marking a WeakRef.");
-    WeakRefSlot *slot = wr.unsafeGetSlot();
-    assert(
-        slot->state() != WeakSlotState::Free &&
-        "marking a freed weak ref slot");
-    slot->mark();
   }
 
   /// Set the drain rate that'll be used for any future calls to drain APIs.
@@ -1373,7 +1361,6 @@ void HadesGC::createSnapshot(llvh::raw_ostream &os) {
   waitForCollectionToFinish("snapshot");
   {
     GCCycle cycle{*this, "GC Heap Snapshot"};
-    WeakRefLock lk{weakRefMutex()};
     GCBase::createSnapshot(*this, os);
   }
 }
@@ -1901,11 +1888,6 @@ void HadesGC::completeMarking() {
 
   // Now free symbols and weak refs.
   gcCallbacks_.freeSymbols(oldGenMarker_->markedSymbols());
-  // NOTE: If sweeping is done concurrently with YG collection, weak references
-  // could be handled during the sweep pass instead of the mark pass. The read
-  // barrier will need to be updated to handle the case where a WeakRef points
-  // to an now-empty cell.
-  updateWeakReferencesForOldGen();
 
   // Nothing needs oldGenMarker_ from this point onward.
   oldGenMarker_.reset();
@@ -2244,11 +2226,6 @@ void *HadesGC::allocLongLived(uint32_t sz) {
   assert(
       isSizeHeapAligned(sz) &&
       "Call to allocLongLived must use a size aligned to HeapAlign");
-  if (kConcurrentGC) {
-    HERMES_SLOW_ASSERT(
-        !weakRefMutex() &&
-        "WeakRef mutex should not be held when allocLongLived is called");
-  }
   assert(gcMutex_ && "GC mutex must be held when calling allocLongLived");
   totalAllocatedBytes_ += sz;
   // Alloc directly into the old gen.
@@ -2850,23 +2827,6 @@ void HadesGC::finalizeYoungGenObjects() {
   youngGenFinalizables_.clear();
 }
 
-void HadesGC::updateWeakReferencesForOldGen() {
-  for (auto &slot : weakSlots_) {
-    switch (slot.state()) {
-      case WeakSlotState::Free:
-        // Skip free weak slots.
-        break;
-      case WeakSlotState::Marked:
-        // Set all allocated slots to unmarked.
-        slot.unmark();
-        break;
-      case WeakSlotState::Unmarked:
-        freeWeakSlot(&slot);
-        break;
-    }
-  }
-}
-
 uint64_t HadesGC::allocatedBytes() const {
   // This can be called very early in initialization, before YG is initialized.
   return (youngGen_ ? youngGen_.used() : 0) + oldGen_.allocatedBytes();
@@ -3133,7 +3093,6 @@ void HadesGC::removeSegmentExtentFromCrashManager(
 #ifdef HERMES_SLOW_DEBUG
 
 void HadesGC::checkWellFormed() {
-  WeakRefLock lk{weakRefMutex()};
   CheckHeapWellFormedAcceptor acceptor(*this);
   {
     DroppingAcceptor<CheckHeapWellFormedAcceptor> nameAcceptor{acceptor};

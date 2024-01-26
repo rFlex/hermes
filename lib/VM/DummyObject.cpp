@@ -20,7 +20,6 @@ const VTable DummyObject::vt{
     CellKind::DummyObjectKind,
     cellSize<DummyObject>(),
     _finalizeImpl,
-    _markWeakImpl,
     _mallocSizeImpl,
     nullptr
 #ifdef HERMES_MEMORY_INSTRUMENTATION
@@ -80,6 +79,8 @@ void DummyObject::_finalizeImpl(GCCell *cell, GC &gc) {
   auto callback = self->finalizerCallback.get(gc);
   if (callback)
     (*callback)();
+  if (self->weak)
+    self->weak->releaseSlot();
   self->releaseExtMem(gc);
 
   // Callback is assumed to point to allocated memory
@@ -91,14 +92,6 @@ size_t DummyObject::_mallocSizeImpl(GCCell *cell) {
   return vmcast<DummyObject>(cell)->extraBytes;
 }
 
-void DummyObject::_markWeakImpl(GCCell *cell, WeakRefAcceptor &acceptor) {
-  auto *self = reinterpret_cast<DummyObject *>(cell);
-  if (self->markWeakCallback)
-    (*self->markWeakCallback)(cell, acceptor);
-  if (self->weak)
-    acceptor.accept(*self->weak);
-}
-
 #ifdef HERMES_MEMORY_INSTRUMENTATION
 void DummyObject::_snapshotAddEdgesImpl(
     GCCell *cell,
@@ -106,6 +99,9 @@ void DummyObject::_snapshotAddEdgesImpl(
     HeapSnapshot &snap) {
   auto *const self = vmcast<DummyObject>(cell);
   if (!self->weak)
+    return;
+  // Filter out empty refs from adding edges.
+  if (!self->weak->isValid())
     return;
   // DummyObject has only one WeakRef field.
   snap.addNamedEdge(

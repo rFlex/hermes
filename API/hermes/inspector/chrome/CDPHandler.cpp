@@ -217,7 +217,7 @@ class CDPHandlerImpl : public message::RequestHandler,
       TSA_NO_THREAD_SAFETY_ANALYSIS;
 
   template <typename T>
-  void setHermesLocation(
+  bool setHermesLocation(
       debugger::SourceLocation &hermesLoc,
       const T &chromeLoc) {
     hermesLoc.line = chromeLoc.lineNumber + 1;
@@ -235,15 +235,11 @@ class CDPHandlerImpl : public message::RequestHandler,
 
     if (chromeLoc.url.has_value()) {
       hermesLoc.fileName = chromeLoc.url.value();
-    } else if (chromeLoc.urlRegex.has_value()) {
-      const std::regex regex(chromeLoc.urlRegex.value());
-      for (const auto &[_, script] : loadedScripts_) {
-        if (std::regex_match(script.fileName, regex)) {
-          hermesLoc.fileName = script.fileName;
-          break;
-        }
-      }
+    } else {
+      return false;
     }
+
+    return true;
   }
 
   template <typename R>
@@ -1283,7 +1279,10 @@ void CDPHandlerImpl::handle(const m::debugger::SetBreakpointByUrlRequest &req) {
     debugger::SourceLocation loc;
     // TODO: getLocationByBreakpointRequest(req);
     // TODO: failure to parse
-    setHermesLocation(loc, req);
+    if (!setHermesLocation(loc, req)) {
+      sendErrorToClient(req.id, "Unsupported location");
+      return;
+    }
     debugger::BreakpointID id = getDebugger().setBreakpoint(loc);
     debugger::BreakpointInfo info{debugger::kInvalidBreakpoint, {}, {}, {}, {}};
     if (id != debugger::kInvalidBreakpoint) {
@@ -1985,6 +1984,16 @@ debugger::Command CDPHandlerImpl::didPause(debugger::Debugger &debugger) {
     }
   }
 
+  // When we handle a `Debugger.pause` request, we simply call
+  // triggerAsyncPause(). This means that CDPHandler uses
+  // `debugger::AsyncPauseKind::Implicit` for both:
+  // 1) when user wants to pause, and
+  // 2) when CDPHandler wants to temporarily pause and run some code.
+  // The pause reason of didPause() will always be AsyncTriggerImplicit. The
+  // fact there are 2 cases is handled by having
+  // processPendingDesiredExecutions() deal with #1 and set `currentExecution_`
+  // to paused. For case #2, that will be taken care of by the following
+  // if-statement because nothing would have changed `currentExecution_`.
   if (Execution::Running == currentExecution_) {
     return debugger::Command::continueExecution();
   }

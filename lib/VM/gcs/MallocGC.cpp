@@ -156,10 +156,6 @@ struct MallocGC::MarkingAcceptor final : public RootAndSlotAcceptorDefault,
         "Tried to mark a symbol not in range");
     markedSymbols_.set(sym.unsafeGetIndex());
   }
-
-  void accept(WeakRefBase &wr) override {
-    wr.unsafeGetSlot()->mark();
-  }
 };
 
 gcheapsize_t MallocGC::Size::storageFootprint() const {
@@ -293,9 +289,6 @@ void MallocGC::collect(std::string cause, bool /*canEffectiveOOM*/) {
     // Update weak roots references.
     markWeakRoots(acceptor, /*markLongLived*/ true);
 
-    // Update and remove weak references.
-    updateWeakReferences();
-    resetWeakReferences();
     // Free the unused symbols.
     gcCallbacks_.freeSymbols(acceptor.markedSymbols_);
     // By the end of the marking loop, all pointers left in pointers_ are dead.
@@ -502,22 +495,6 @@ void MallocGC::getCrashManagerHeapInfo(CrashManager::HeapInformation &info) {
 void MallocGC::forAllObjs(const std::function<void(GCCell *)> &callback) {
   for (auto *ptr : pointers_) {
     callback(ptr->data());
-  }
-}
-
-void MallocGC::resetWeakReferences() {
-  for (auto &slot : weakSlots_) {
-    // Set all allocated slots to unmarked.
-    if (slot.state() == WeakSlotState::Marked)
-      slot.unmark();
-  }
-}
-
-void MallocGC::updateWeakReferences() {
-  for (auto &slot : weakSlots_) {
-    if (slot.state() == WeakSlotState::Unmarked) {
-      freeWeakSlot(&slot);
-    }
   }
 }
 

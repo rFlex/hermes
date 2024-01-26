@@ -14,6 +14,7 @@ set(RTSources
   AlignedStorageTest.cpp
   ArrayTest.cpp
   ArrayStorageTest.cpp
+  Base64UtilTest.cpp
   BigIntPrimitiveTest.cpp
   BytecodeProviderTest.cpp
   CallResultTest.cpp
@@ -33,7 +34,6 @@ set(RTSources
   GCGuardPageNCTest.cpp
   GCInitTest.cpp
   GCLazySegmentNCTest.cpp
-  GCMarkWeakTest.cpp
   GCObjectIterationTest.cpp
   GCOOMTest.cpp
   GCReturnUnusedMemoryTest.cpp
