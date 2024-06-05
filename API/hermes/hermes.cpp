@@ -2481,7 +2481,7 @@ std::unique_ptr<HermesRuntime> adoptHermesRuntime(
   // the setter and not using make_unique, so the call to new is here
   // in this function, which is a friend of debugger::Debugger.
   ret->setDebugger(std::unique_ptr<debugger::Debugger>(
-      new debugger::Debugger(ret.get(), &(ret->runtime_.getDebugger()))));
+      new debugger::Debugger(ret.get(), ret->runtime_)));
 #else
   ret->setDebugger(std::make_unique<debugger::Debugger>());
 #endif
