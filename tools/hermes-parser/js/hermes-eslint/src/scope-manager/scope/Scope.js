@@ -17,9 +17,11 @@ import type {ClassScope} from './ClassScope';
 import type {ClassStaticBlockScope} from './ClassStaticBlockScope';
 import type {ComponentScope} from './ComponentScope';
 import type {DeclareModuleScope} from './DeclareModuleScope';
+import type {DeclareNamespaceScope} from './DeclareNamespaceScope';
 import type {ForScope} from './ForScope';
 import type {FunctionExpressionNameScope} from './FunctionExpressionNameScope';
 import type {FunctionScope} from './FunctionScope';
+import type {HookScope} from './HookScope';
 import type {GlobalScope} from './GlobalScope';
 import type {ModuleScope} from './ModuleScope';
 import type {SwitchScope} from './SwitchScope';
@@ -34,9 +36,11 @@ type Scope =
   | ClassScope
   | ClassStaticBlockScope
   | DeclareModuleScope
+  | DeclareNamespaceScope
   | ForScope
   | FunctionExpressionNameScope
   | FunctionScope
+  | HookScope
   | GlobalScope
   | ModuleScope
   | SwitchScope

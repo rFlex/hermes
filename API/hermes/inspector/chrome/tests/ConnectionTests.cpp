@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -536,6 +537,7 @@ TEST(CleanUpTests, testDestructor) {
   EXPECT_EQ(a.getNumber(), 2);
 }
 
+// Not applicable for CDPAgent
 TEST_F(ConnectionTests, testUnregisteringCallback) {
   asyncRuntime.executeScriptAsync(R"(
     var a = 1 + 2;
@@ -555,6 +557,7 @@ TEST_F(ConnectionTests, testUnregisteringCallback) {
   EXPECT_TRUE(conn.registerCallbacks());
 }
 
+// Also implemented as CDPAgentTest::DebuggerScriptsOnEnable
 TEST_F(ConnectionTests, testScriptsOnEnable) {
   int msgId = 1;
 
@@ -574,6 +577,7 @@ TEST_F(ConnectionTests, testScriptsOnEnable) {
   expectNotification<m::debugger::ScriptParsedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerScriptsOrdering
 TEST_F(ConnectionTests, testScriptsOrdering) {
   int msgId = 1;
   std::vector<m::debugger::ScriptParsedNotification> notifications;
@@ -611,6 +615,7 @@ TEST_F(ConnectionTests, testScriptsOrdering) {
   }
 }
 
+// Also implemented as CDPAgentTest::DebuggerBytecodeScript
 TEST_F(ConnectionTests, testBytecodeScript) {
   int msgId = 1;
   send<m::debugger::EnableRequest>(conn, msgId++);
@@ -631,6 +636,7 @@ TEST_F(ConnectionTests, testBytecodeScript) {
   expectNothing(conn);
 }
 
+// Also implemented as CDPAgentTest::CDPAgentRejectsMalformedMethods
 TEST_F(ConnectionTests, testRespondsErrorToUnknownRequests) {
   asyncRuntime.executeScriptAsync(R"(
     var a = 1 + 2;
@@ -649,6 +655,7 @@ TEST_F(ConnectionTests, testRespondsErrorToUnknownRequests) {
   EXPECT_EQ(resp2.code, -32601);
 }
 
+// Also implemented as CDPAgentTest::DebuggerTestDebuggerStatement
 TEST_F(ConnectionTests, testDebuggerStatement) {
   int msgId = 1;
 
@@ -667,6 +674,7 @@ TEST_F(ConnectionTests, testDebuggerStatement) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testDebuggerStatementFromPausedWaitEnable) {
   int msgId = 1;
 
@@ -690,6 +698,7 @@ TEST_F(ConnectionTests, testDebuggerStatementFromPausedWaitEnable) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testIsDebuggerAttached) {
   int msgId = 1;
 
@@ -714,6 +723,7 @@ TEST_F(ConnectionTests, testIsDebuggerAttached) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerStepOver
 TEST_F(ConnectionTests, testStepOver) {
   int msgId = 1;
 
@@ -746,6 +756,7 @@ TEST_F(ConnectionTests, testStepOver) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerStepIn
 TEST_F(ConnectionTests, testStepIn) {
   int msgId = 1;
 
@@ -782,6 +793,7 @@ TEST_F(ConnectionTests, testStepIn) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerStepOut
 TEST_F(ConnectionTests, testStepOut) {
   int msgId = 1;
 
@@ -816,6 +828,7 @@ TEST_F(ConnectionTests, testStepOut) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerSetBreakpointByUrl
 TEST_F(ConnectionTests, testSetBreakpoint) {
   int msgId = 1;
 
@@ -859,6 +872,219 @@ TEST_F(ConnectionTests, testSetBreakpoint) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerSetMultiLocationBreakpoint
+TEST_F(ConnectionTests, testSetMultiLocationBreakpoint) {
+  int msgId = 1;
+
+  asyncRuntime.executeScriptAsync(
+      R"(
+        function one() {
+          var a = 1;
+          var b = 2;
+          var c = a + b;
+        }
+  )",
+      "someFile");
+
+  asyncRuntime.executeScriptAsync(
+      R"(
+        function two() {
+          var d = 3;
+          var e = 4;
+          var f = d + e;
+        }
+  )",
+      "someFile");
+
+  asyncRuntime.executeScriptAsync(
+      R"(
+    debugger; // First break, line 1
+    one();
+    two();
+    debugger; // Last break, line 4
+  )",
+      "doesntMatch");
+
+  send<m::debugger::EnableRequest>(conn, msgId++);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+
+  // First break, the first "debugger;"
+  expectPaused(conn, "other", {{"global", 1, 1}});
+
+  // Set a breakpoint that applies to two Hermes locations
+  m::debugger::SetBreakpointByUrlRequest req;
+  req.url = "someFile";
+  req.id = msgId++;
+  req.lineNumber = 2;
+  req.columnNumber = 0;
+  conn.send(req.toJsonStr());
+
+  auto resp =
+      expectResponse<m::debugger::SetBreakpointByUrlResponse>(conn, req.id);
+
+  EXPECT_FALSE(resp.breakpointId.empty());
+  EXPECT_NE(
+      resp.breakpointId,
+      std::to_string(facebook::hermes::debugger::kInvalidBreakpoint));
+  EXPECT_EQ(resp.locations.size(), 2);
+  for (auto &location : resp.locations) {
+    EXPECT_EQ(location.lineNumber, 2);
+  }
+
+  // Continue so we can hit the breakpoints...
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+
+  // Second break, breakpoint in function "one"
+  expectPaused(conn, "other", {{"one", 2, 2}, {"global", 2, 1}});
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+
+  // Third break, breakpoint in function "two"
+  expectPaused(conn, "other", {{"two", 2, 2}, {"global", 3, 1}});
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+
+  // Last break, the second "debugger;""
+  expectPaused(conn, "other", {{"global", 4, 1}});
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+}
+
+// Also implemented as CDPAgentTest::DebuggerDeleteMultiLocationBreakpoint
+TEST_F(ConnectionTests, testDeleteMultiLocationBreakpoint) {
+  int msgId = 1;
+
+  asyncRuntime.executeScriptAsync(
+      R"(
+        function one() {
+          var a = 1;
+          var b = 2;
+          var c = a + b;
+        }
+  )",
+      "someFile");
+
+  asyncRuntime.executeScriptAsync(
+      R"(
+        function two() {
+          var d = 3;
+          var e = 4;
+          var f = d + e;
+        }
+  )",
+      "someFile");
+
+  asyncRuntime.executeScriptAsync(
+      R"(
+    debugger; // First break, line 1
+    one();
+    two();
+    debugger; // Last break, line 4
+  )",
+      "doesntMatch");
+
+  send<m::debugger::EnableRequest>(conn, msgId++);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+
+  // First break, the first "debugger;"
+  expectPaused(conn, "other", {{"global", 1, 1}});
+
+  // Set a breakpoint that applies to two Hermes locations
+  m::debugger::SetBreakpointByUrlRequest req;
+  req.url = "someFile";
+  req.id = msgId++;
+  req.lineNumber = 2;
+  req.columnNumber = 0;
+  conn.send(req.toJsonStr());
+
+  auto resp =
+      expectResponse<m::debugger::SetBreakpointByUrlResponse>(conn, req.id);
+  EXPECT_EQ(resp.locations.size(), 2);
+
+  m::debugger::RemoveBreakpointRequest req2;
+  req2.id = msgId++;
+  req2.breakpointId = resp.breakpointId;
+  conn.send(req2.toJsonStr());
+  expectResponse<m::OkResponse>(conn, req2.id);
+
+  // Continue so we can hit the breakpoints...
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+
+  // Breakpoints that were set and deleted are not hit
+
+  // Last break, the second "debugger;""
+  expectPaused(conn, "other", {{"global", 4, 1}});
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+}
+
+// Also implemented as CDPAgentTest::DebuggerApplyBreakpointsToNewLoadedScripts
+TEST_F(ConnectionTests, testApplyBreakpointsToLoadedScripts) {
+  int msgId = 1;
+
+  send<m::debugger::EnableRequest>(conn, msgId++);
+
+  // Set a breakpoint that applies to zero Hermes locations
+  m::debugger::SetBreakpointByUrlRequest req;
+  req.url = "someFile";
+  req.id = msgId++;
+  req.lineNumber = 2;
+  req.columnNumber = 0;
+  conn.send(req.toJsonStr());
+
+  auto resp =
+      expectResponse<m::debugger::SetBreakpointByUrlResponse>(conn, req.id);
+
+  // Ensure the breakpoint was successfully created
+  EXPECT_FALSE(resp.breakpointId.empty());
+  EXPECT_NE(
+      resp.breakpointId,
+      std::to_string(facebook::hermes::debugger::kInvalidBreakpoint));
+  EXPECT_EQ(resp.locations.size(), 0);
+
+  // Load a script that matches the breakpoint description
+  asyncRuntime.executeScriptAsync(
+      R"(
+        var a = 1;
+        var b = 2;
+        var c = a + b;
+  )",
+      "someFile");
+  auto parsed = expectNotification<m::debugger::ScriptParsedNotification>(conn);
+
+  // Ensure the breakpoint was applied
+  auto resolution =
+      expectNotification<m::debugger::BreakpointResolvedNotification>(conn);
+  EXPECT_EQ(resolution.location.scriptId, parsed.scriptId);
+  EXPECT_EQ(resolution.location.lineNumber, 2);
+
+  // Ensure the breakpoint is hit
+  expectPaused(conn, "other", {{"global", 2, 1}});
+  send<m::debugger::ResumeRequest>(conn, msgId++);
+  expectNotification<m::debugger::ResumedNotification>(conn);
+
+  // Load a script that doesn't match the breakpoint description
+  asyncRuntime.executeScriptAsync(
+      R"(
+        var a = 1;
+        var b = 2;
+        var c = a + b;
+  )",
+      "anotherFile");
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+
+  // Ensure the breakpoint wasn't applied (i.e. no breakpoint resolved
+  // notification and no breakpoints hit).
+  expectNothing(conn);
+}
+
+// Also implemented as CDPAgentTest::DebuggerSetBreakpointById
 TEST_F(ConnectionTests, testSetBreakpointById) {
   int msgId = 1;
 
@@ -892,6 +1118,7 @@ TEST_F(ConnectionTests, testSetBreakpointById) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerActivateBreakpoints
 TEST_F(ConnectionTests, testActivateBreakpoints) {
   int msgId = 1;
 
@@ -952,6 +1179,7 @@ TEST_F(ConnectionTests, testActivateBreakpoints) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetBreakpointByIdWithColumnInIndenting) {
   int msgId = 1;
 
@@ -988,6 +1216,7 @@ TEST_F(ConnectionTests, testSetBreakpointByIdWithColumnInIndenting) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetLazyBreakpoint) {
   int msgId = 1;
 
@@ -1037,6 +1266,7 @@ TEST_F(ConnectionTests, testSetLazyBreakpoint) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetBreakpointWhileRunning) {
   int msgId = 1;
 
@@ -1080,6 +1310,7 @@ TEST_F(ConnectionTests, testSetBreakpointWhileRunning) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetBreakpointConditional) {
   int msgId = 1;
 
@@ -1142,6 +1373,7 @@ TEST_F(ConnectionTests, testSetBreakpointConditional) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::DebuggerRemoveBreakpoint
 TEST_F(ConnectionTests, testRemoveBreakpoint) {
   int msgId = 1;
 
@@ -1192,6 +1424,7 @@ TEST_F(ConnectionTests, testRemoveBreakpoint) {
   EXPECT_EQ(finalValue.asNumber(), 4);
 }
 
+// Also implemented as CDPAgentTest::DebuggerAsyncPauseWhileRunning
 TEST_F(ConnectionTests, testAsyncPauseWhileRunning) {
   int msgId = 1;
 
@@ -1227,6 +1460,7 @@ TEST_F(ConnectionTests, testAsyncPauseWhileRunning) {
   asyncRuntime.stop();
 }
 
+// Also implemented as CDPAgentTest::DebuggerEvalOnCallFrame
 TEST_F(ConnectionTests, testEvalOnCallFrame) {
   int msgId = 1;
 
@@ -1340,6 +1574,7 @@ TEST_F(ConnectionTests, testEvalOnCallFrame) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeEnableDisable
 TEST_F(ConnectionTests, testRuntimeEnable) {
   int msgId = 1;
 
@@ -1347,6 +1582,7 @@ TEST_F(ConnectionTests, testRuntimeEnable) {
   expectExecutionContextCreated(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeEvaluate
 TEST_F(ConnectionTests, testRuntimeEvaluate) {
   int msgId = 1;
 
@@ -1394,6 +1630,7 @@ TEST_F(ConnectionTests, testRuntimeEvaluate) {
   asyncRuntime.stop();
 }
 
+// Also implemented as CDPAgentTest::RuntimeEvaluateReturnByValue
 TEST_F(ConnectionTests, testRuntimeEvaluateReturnByValue) {
   int msgId = 1;
 
@@ -1435,6 +1672,7 @@ TEST_F(ConnectionTests, testRuntimeEvaluateReturnByValue) {
   asyncRuntime.stop();
 }
 
+// Also implemented as CDPAgentTest::RuntimeCompileScript
 TEST_F(ConnectionTests, testRuntimeCompileScript) {
   int msgId = 1;
 
@@ -1459,6 +1697,32 @@ TEST_F(ConnectionTests, testRuntimeCompileScript) {
   asyncRuntime.stop();
 }
 
+// Also implemented as CDPAgentTest::RuntimeCompileScriptParseError
+TEST_F(ConnectionTests, testRuntimeCompileScriptParseError) {
+  int msgId = 1;
+
+  asyncRuntime.executeScriptAsync("while(!shouldStop());");
+
+  send<m::runtime::EnableRequest>(conn, msgId++);
+  expectExecutionContextCreated(conn);
+
+  send<m::debugger::EnableRequest>(conn, msgId++);
+  expectNotification<m::debugger::ScriptParsedNotification>(conn);
+
+  m::runtime::CompileScriptRequest req;
+  req.id = msgId;
+  req.persistScript = true;
+  req.sourceURL = "none";
+  req.expression = "/oops";
+  conn.send(req.toJsonStr());
+
+  auto resp = expectResponse<m::runtime::CompileScriptResponse>(conn, 3);
+  EXPECT_TRUE(resp.exceptionDetails.has_value());
+
+  asyncRuntime.stop();
+}
+
+// Also implemented as CDPAgentTest::DebuggerEvalOnCallFrameException
 TEST_F(ConnectionTests, testEvalOnCallFrameException) {
   int msgId = 1;
 
@@ -1520,6 +1784,7 @@ TEST_F(ConnectionTests, testEvalOnCallFrameException) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testLoadMultipleScripts) {
   int msgId = 1;
 
@@ -1565,6 +1830,7 @@ TEST_F(ConnectionTests, testLoadMultipleScripts) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeGetProperties
 TEST_F(ConnectionTests, testGetProperties) {
   int msgId = 1;
   std::vector<std::string> objIds;
@@ -1664,6 +1930,7 @@ TEST_F(ConnectionTests, testGetProperties) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeGetPropertiesOnlyOwn
 TEST_F(ConnectionTests, testGetPropertiesOnlyOwnProperties) {
   int msgId = 1;
 
@@ -1727,6 +1994,7 @@ TEST_F(ConnectionTests, testGetPropertiesOnlyOwnProperties) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testDisable) {
   int msgId = 1;
 
@@ -1762,6 +2030,7 @@ TEST_F(ConnectionTests, testDisable) {
   asyncRuntime.stop();
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testDisableWhileRunning) {
   int msgId = 1;
 
@@ -1802,6 +2071,7 @@ TEST_F(ConnectionTests, testDisableWhileRunning) {
   asyncRuntime.start();
 }
 
+// Also implemented as CDPAgentTest::DebuggerSetPauseOnExceptionsAll
 TEST_F(ConnectionTests, testSetPauseOnExceptionsAll) {
   int msgId = 1;
 
@@ -1849,6 +2119,7 @@ TEST_F(ConnectionTests, testSetPauseOnExceptionsAll) {
   EXPECT_EQ(asyncRuntime.getLastThrownExceptionMessage(), "Uncaught exception");
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetPauseOnExceptionsNone) {
   int msgId = 1;
 
@@ -1887,6 +2158,7 @@ TEST_F(ConnectionTests, testSetPauseOnExceptionsNone) {
   EXPECT_EQ(asyncRuntime.getLastThrownExceptionMessage(), "Uncaught exception");
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetPauseOnExceptionsUncaught) {
   int msgId = 1;
 
@@ -1929,6 +2201,7 @@ TEST_F(ConnectionTests, testSetPauseOnExceptionsUncaught) {
   EXPECT_EQ(asyncRuntime.getLastThrownExceptionMessage(), "Uncaught exception");
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, invalidPauseModeGivesError) {
   m::debugger::SetPauseOnExceptionsRequest req;
   req.id = 1;
@@ -1937,6 +2210,7 @@ TEST_F(ConnectionTests, invalidPauseModeGivesError) {
   expectResponse<m::ErrorResponse>(conn, req.id);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testShouldPauseOnThrow) {
   int msgId = 1;
 
@@ -1995,6 +2269,7 @@ TEST_F(ConnectionTests, testShouldPauseOnThrow) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testScopeVariables) {
   int msgId = 1;
 
@@ -2095,6 +2370,7 @@ TEST_F(ConnectionTests, testScopeVariables) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeCallFunctionOnObject
 TEST_F(ConnectionTests, testRuntimeCallFunctionOnObject) {
   int msgId = 1;
 
@@ -2212,6 +2488,7 @@ TEST_F(ConnectionTests, testRuntimeCallFunctionOnObject) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeCallFunctionOnExecutionContext
 TEST_F(ConnectionTests, testRuntimeCallFunctionOnExecutionContext) {
   int msgId = 1;
 
@@ -2326,6 +2603,7 @@ TEST_F(ConnectionTests, testRuntimeCallFunctionOnExecutionContext) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeConsoleLog
 TEST_F(ConnectionTests, testConsoleLog) {
   int msgId = 1;
 
@@ -2333,7 +2611,7 @@ TEST_F(ConnectionTests, testConsoleLog) {
     debugger; [1]
     var object1 = {number1: 1, bool1: false};
     var object2 = {number2: 2, bool2: true};
-    console.warn('string value', object1, object2);
+    console.warn('string value', object1, object2, '{"number3": 3}');
 
     debugger; // Hit debugger statement so that we receive console
               // api notification before VM gets destroyed.
@@ -2352,7 +2630,7 @@ TEST_F(ConnectionTests, testConsoleLog) {
   auto warningNote =
       expectNotification<m::runtime::ConsoleAPICalledNotification>(conn);
   EXPECT_EQ(warningNote.type, "warning");
-  EXPECT_EQ(warningNote.args.size(), 3);
+  EXPECT_EQ(warningNote.args.size(), 4);
 
   EXPECT_EQ(warningNote.args[0].type, "string");
   EXPECT_EQ(*warningNote.args[0].value, "\"string value\"");
@@ -2360,6 +2638,10 @@ TEST_F(ConnectionTests, testConsoleLog) {
   EXPECT_EQ(warningNote.args[1].type, "object");
 
   EXPECT_EQ(warningNote.args[2].type, "object");
+
+  EXPECT_EQ(warningNote.args[3].type, "string");
+  // This assertion is equivalent to CDPAgentTest::RuntimeConsoleLogJSON
+  EXPECT_EQ(*warningNote.args[3].value, R"("{\"number3\": 3}")");
 
   expectPaused(conn, "other", {{"global", 6, 1}});
 
@@ -2387,6 +2669,7 @@ TEST_F(ConnectionTests, testConsoleLog) {
   expectNothing(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testConsoleGroup) {
   int msgId = 1;
 
@@ -2465,6 +2748,7 @@ TEST_F(ConnectionTests, testConsoleGroup) {
   expectNothing(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeConsoleBuffer
 TEST_F(ConnectionTests, testConsoleBuffer) {
   int msgId = 1;
 
@@ -2477,7 +2761,7 @@ TEST_F(ConnectionTests, testConsoleBuffer) {
       << "}";
 
   asyncRuntime.executeScriptAsync(oss.str());
-  asyncRuntime.wait();
+  asyncRuntime.wait(std::chrono::milliseconds(3500));
 
   bool receivedWarning = false;
   std::array<bool, kExpectedMaxBufferSize> received;
@@ -2526,6 +2810,7 @@ TEST_F(ConnectionTests, testConsoleBuffer) {
   }
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testThisObject) {
   int msgId = 1;
 
@@ -2592,6 +2877,7 @@ TEST_F(ConnectionTests, testThisObject) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetBreakpointsMultipleScripts) {
   int msgId = 1;
 
@@ -2676,6 +2962,7 @@ TEST_F(ConnectionTests, testSetBreakpointsMultipleScripts) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testSetBreakpointByUrlRegex) {
   int msgId = 1;
 
@@ -2705,6 +2992,7 @@ TEST_F(ConnectionTests, testSetBreakpointByUrlRegex) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testColumnBreakpoint) {
   int msgId = 1;
 
@@ -2742,6 +3030,7 @@ function foo(){x=1}debugger;foo();
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, canBreakOnScriptsWithSourceMap) {
   int msgId = 1;
 
@@ -2782,6 +3071,7 @@ TEST_F(ConnectionTests, canBreakOnScriptsWithSourceMap) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, wontStopOnFilesWithoutSourceMaps) {
   int msgId = 1;
 
@@ -2816,6 +3106,7 @@ struct WaitForDebuggerTests : public ConnectionTests {
   WaitForDebuggerTests() : ConnectionTests(true) {}
 };
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(WaitForDebuggerTests, runIfWaitingForDebugger) {
   int msgId = 0;
 
@@ -2853,6 +3144,7 @@ TEST_F(WaitForDebuggerTests, runIfWaitingForDebugger) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::HeapProfilerSampling
 TEST_F(ConnectionTests, heapProfilerSampling) {
   int msgId = 1;
 
@@ -2906,6 +3198,7 @@ TEST_F(ConnectionTests, heapProfilerSampling) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::RuntimeGetHeapUsage
 TEST_F(ConnectionTests, getHeapUsage) {
   int msgId = 1;
 
@@ -2934,6 +3227,7 @@ TEST_F(ConnectionTests, getHeapUsage) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::HeapProfilerCollectGarbage
 TEST_F(ConnectionTests, collectGarbage) {
   int msgId = 1;
 
@@ -2977,6 +3271,7 @@ TEST_F(ConnectionTests, collectGarbage) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::HeapProfilerSnapshotRemoteObject
 TEST_F(ConnectionTests, heapSnapshotRemoteObject) {
   std::shared_ptr<HermesRuntime> runtime = asyncRuntime.runtime();
   int msgId = 1;
@@ -3054,6 +3349,7 @@ TEST_F(ConnectionTests, heapSnapshotRemoteObject) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::ProfilerBasicOperation
 TEST_F(ConnectionTests, DISABLED_testBasicProfilerOperation) {
   SamplingProfilerRAII spRegistration(asyncRuntime);
   int msgId = 1;
@@ -3096,6 +3392,7 @@ TEST_F(ConnectionTests, DISABLED_testBasicProfilerOperation) {
   asyncRuntime.stop();
 }
 
+// Also implemented as CDPAgentTest::RuntimeGlobalLexicalScopeNames
 TEST_F(ConnectionTests, testGlobalLexicalScopeNames) {
   int msgId = 1;
   asyncRuntime.executeScriptAsync(R"(
@@ -3147,6 +3444,7 @@ TEST_F(ConnectionTests, testGlobalLexicalScopeNames) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// TODO: Missing test in CDPAgentTest
 TEST_F(ConnectionTests, testInvalidExecutionContext) {
   int msgId = 1;
   send<m::runtime::EnableRequest>(conn, msgId++);
@@ -3169,6 +3467,7 @@ TEST_F(ConnectionTests, testInvalidExecutionContext) {
   expectNotification<m::debugger::ResumedNotification>(conn);
 }
 
+// Also implemented as CDPAgentTest::HeapProfilerSnapshot
 TEST_F(ConnectionTests, heapSnapshot) {
   std::shared_ptr<HermesRuntime> runtime = asyncRuntime.runtime();
   int msgId = 1;

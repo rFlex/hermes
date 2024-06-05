@@ -116,33 +116,28 @@ void JSParserImpl::initializeIdentifiers() {
 
   checksIdent_ = lexer_.getIdentifier("%checks");
   assertsIdent_ = lexer_.getIdentifier("asserts");
+  impliesIdent_ = lexer_.getIdentifier("implies");
 
   // Flow Component syntax
   componentIdent_ = lexer_.getIdentifier("component");
   rendersIdent_ = lexer_.getIdentifier("renders");
   rendersMaybeOperator_ = lexer_.getIdentifier("renders?");
   rendersStarOperator_ = lexer_.getIdentifier("renders*");
-
+  hookIdent_ = lexer_.getIdentifier("hook");
 #endif
 
 #if HERMES_PARSE_TS
-
-  namespaceIdent_ = lexer_.getIdentifier("namespace");
   readonlyIdent_ = lexer_.getIdentifier("readonly");
   neverIdent_ = lexer_.getIdentifier("never");
   undefinedIdent_ = lexer_.getIdentifier("undefined");
   unknownIdent_ = lexer_.getIdentifier("unknown");
-
 #endif
 
 #if HERMES_PARSE_FLOW || HERMES_PARSE_TS
-
+  namespaceIdent_ = lexer_.getIdentifier("namespace");
   isIdent_ = lexer_.getIdentifier("is");
-
-#endif
-
-#if HERMES_PARSE_FLOW || HERMES_PARSE_TS
   inferIdent_ = lexer_.getIdentifier("infer");
+  constIdent_ = lexer_.getIdentifier("const");
 #endif
 
   // Generate the string representation of all tokens.
@@ -838,7 +833,7 @@ bool JSParserImpl::parseStatementListItem(
   } else if (context_.getParseFlow() && checkDeclareType()) {
     // declare var, declare function, declare interface, etc.
     SMLoc start = advance(JSLexer::GrammarContext::Type).Start;
-    auto decl = parseDeclareFLow(start, AllowDeclareExportType::No);
+    auto decl = parseDeclareFLow(start);
     if (!decl)
       return false;
     stmtList.push_back(*decl.getValue());
@@ -4085,6 +4080,22 @@ Optional<ESTree::Node *> JSParserImpl::parseBinaryExpression(Param param) {
             new (context_) ESTree::TSAsExpressionNode(left, right));
       } else {
         assert(context_.getParseFlow() && "must be parsing types");
+        if (auto *gen =
+                llvh::dyn_cast<ESTree::GenericTypeAnnotationNode>(right);
+            gen && !gen->_typeParameters && gen->getParens() == 0) {
+          if (auto *ident = llvh::dyn_cast<ESTree::IdentifierNode>(gen->_id)) {
+            if (ident->_name == constIdent_ && !ident->_optional &&
+                !ident->_typeAnnotation) {
+              // Special case for `x as const`,
+              // which only is used when the `const` type has no parens
+              // (otherwise, it's just a GenericTypeAnnotationNode).
+              return setLocation(
+                  startLoc,
+                  endLoc,
+                  new (context_) ESTree::AsConstExpressionNode(left));
+            }
+          }
+        }
         return setLocation(
             startLoc,
             endLoc,
@@ -4169,11 +4180,11 @@ Optional<ESTree::Node *> JSParserImpl::parseBinaryExpression(Param param) {
     //                 We are here
     // Push topExpr and the '*', so we can parse rightExpr.
     stack.emplace_back(topExpr, tok_->getKind(), topExprStartLoc);
-    advance();
 
-    topExprStartLoc = tok_->getStartLoc();
 #if HERMES_PARSE_TS || HERMES_PARSE_FLOW
     if (LLVM_UNLIKELY(stack.back().opKind == TokenKind::as_operator)) {
+      advance(JSLexer::GrammarContext::Type);
+      topExprStartLoc = tok_->getStartLoc();
       auto optRightExpr = parseTypeAnnotation();
       if (!optRightExpr)
         return None;
@@ -4181,6 +4192,8 @@ Optional<ESTree::Node *> JSParserImpl::parseBinaryExpression(Param param) {
     } else
 #endif
     {
+      advance();
+      topExprStartLoc = tok_->getStartLoc();
       if (LLVM_UNLIKELY(check(TokenKind::private_identifier))) {
         topExpr = consumePrivateIdentifier();
       } else {
@@ -6668,6 +6681,17 @@ Optional<ESTree::Node *> JSParserImpl::parseExportDeclaration() {
           startLoc,
           *optComponent,
           new (context_) ESTree::ExportDefaultDeclarationNode(*optComponent));
+    } else if (
+        context_.getParseFlow() && context_.getParseFlowComponentSyntax() &&
+        checkHookDeclarationFlow()) {
+      auto optHook = parseHookDeclarationFlow(tok_->getStartLoc());
+      if (!optHook) {
+        return None;
+      }
+      return setLocation(
+          startLoc,
+          *optHook,
+          new (context_) ESTree::ExportDefaultDeclarationNode(*optHook));
     } else if (context_.getParseFlow() && check(TokenKind::rw_enum)) {
       auto optEnum =
           parseEnumDeclarationFlow(tok_->getStartLoc(), /* declare */ false);

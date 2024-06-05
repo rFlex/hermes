@@ -17,7 +17,7 @@
 
 // lint directives to let us do some basic validation of generated files
 /* eslint no-undef: 'error', no-unused-vars: ['error', {vars: "local"}], no-redeclare: 'error' */
-/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray */
+/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray, $FlowFixMe */
 
 'use strict';
 
@@ -42,6 +42,9 @@ export const HERMES_AST_VISITOR_KEYS = {
     typeParameters: 'Node',
     returnType: 'Node',
     predicate: 'Node',
+  },
+  AsConstExpression: {
+    expression: 'Node',
   },
   AsExpression: {
     expression: 'Node',
@@ -181,6 +184,9 @@ export const HERMES_AST_VISITOR_KEYS = {
     id: 'Node',
     predicate: 'Node',
   },
+  DeclareHook: {
+    id: 'Node',
+  },
   DeclareInterface: {
     id: 'Node',
     typeParameters: 'Node',
@@ -193,6 +199,10 @@ export const HERMES_AST_VISITOR_KEYS = {
   },
   DeclareModuleExports: {
     typeAnnotation: 'Node',
+  },
+  DeclareNamespace: {
+    id: 'Node',
+    body: 'Node',
   },
   DeclareOpaqueType: {
     id: 'Node',
@@ -214,6 +224,13 @@ export const HERMES_AST_VISITOR_KEYS = {
   },
   EmptyStatement: {},
   EmptyTypeAnnotation: {},
+  EnumBigIntBody: {
+    members: 'NodeList',
+  },
+  EnumBigIntMember: {
+    id: 'Node',
+    init: 'Node',
+  },
   EnumBooleanBody: {
     members: 'NodeList',
   },
@@ -310,6 +327,19 @@ export const HERMES_AST_VISITOR_KEYS = {
   },
   GenericTypeAnnotation: {
     id: 'Node',
+    typeParameters: 'Node',
+  },
+  HookDeclaration: {
+    id: 'Node',
+    params: 'NodeList',
+    body: 'Node',
+    typeParameters: 'Node',
+    returnType: 'Node',
+  },
+  HookTypeAnnotation: {
+    params: 'NodeList',
+    returnType: 'Node',
+    rest: 'Node',
     typeParameters: 'Node',
   },
   Identifier: {

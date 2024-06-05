@@ -222,17 +222,46 @@ class ES6ClassesTransformations {
     visitESTreeChildren(*this, node);
   }
 
-  bool incRecursionDepth(ESTree::Node *) {
+  bool incRecursionDepth(ESTree::Node *n) {
+    if (LLVM_UNLIKELY(recursionDepth_ == 0))
+      return false;
+    --recursionDepth_;
+    if (LLVM_UNLIKELY(recursionDepth_ == 0)) {
+      context_.getSourceErrorManager().error(
+          n->getEndLoc(),
+          "Too many nested expressions/statements/declarations");
+      return false;
+    }
     return true;
   }
 
-  void decRecursionDepth() {}
+  void decRecursionDepth() {
+    assert(
+        recursionDepth_ < MAX_RECURSION_DEPTH &&
+        "recursionDepth_ cannot go negative");
+    if (LLVM_LIKELY(recursionDepth_ != 0))
+      ++recursionDepth_;
+  }
 
  private:
   Context &context_;
   UniqueString *const identVar_;
   VisitedClass *_currentProcessingClass = nullptr;
   const ResolvedClassMember *_currentClassMember = nullptr;
+
+  /// The maximum AST nesting level. Once we reach it, we report an error and
+  /// stop.
+  static constexpr unsigned MAX_RECURSION_DEPTH =
+#if defined(HERMES_LIMIT_STACK_DEPTH) || defined(_MSC_VER)
+      512
+#else
+      1024
+#endif
+      ;
+
+  /// MAX_RECURSION_DEPTH minus the current AST nesting level. Once it reaches
+  /// 0 stop transforming it.
+  unsigned recursionDepth_ = MAX_RECURSION_DEPTH;
 
   ESTree::VisitResult doVisitChildren(ESTree::Node *node) {
     visitESTreeChildren(*this, node);
@@ -685,9 +714,14 @@ class ES6ClassesTransformations {
 
         auto *functionExpr =
             llvh::cast<ESTree::FunctionExpressionNode>(srcNode->_value);
-        // Remove method name to prevent symbol resolution conflicts.
-        // The function name will be re-added at runtime
-        functionExpr->_id = nullptr;
+        // Prefix and Suffix method name with # to prevent symbol resolution
+        // conflicts. The function name will be re-added at runtime
+
+        auto newIdentifierNode = cloneNode(identifierNode);
+        newIdentifierNode->_name = context_.getStringTable().getString(
+            ("#" + newIdentifierNode->_name->str() + "#").str());
+
+        functionExpr->_id = newIdentifierNode;
         parameters.append(functionExpr);
       } else {
         parameters.append(cloneNode(classMember.key));

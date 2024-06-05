@@ -87,6 +87,16 @@ ESTREE_NODE_5_ARGS(
 ESTREE_IGNORE_IF_EMPTY(ComponentDeclaration, typeParameters)
 ESTREE_IGNORE_IF_EMPTY(ComponentDeclaration, rendersType)
 
+ESTREE_NODE_5_ARGS(
+    HookDeclaration, FunctionLike,
+    NodePtr, id, false,
+    NodeList, params, false,
+    NodePtr, body, false,
+    NodePtr, typeParameters, true,
+    NodePtr, returnType, true)
+ESTREE_IGNORE_IF_EMPTY(HookDeclaration, typeParameters)
+ESTREE_IGNORE_IF_EMPTY(HookDeclaration, returnType)
+
 #endif
 
 ESTREE_LAST(FunctionLike)
@@ -739,6 +749,12 @@ ESTREE_NODE_5_ARGS(
     NodePtr, returnType, false,
     NodePtr, rest, true,
     NodePtr, typeParameters, true)
+ESTREE_NODE_4_ARGS(
+    HookTypeAnnotation, Flow,
+    NodeList, params, false,
+    NodePtr, returnType, false,
+    NodePtr, rest, true,
+    NodePtr, typeParameters, true)
 ESTREE_NODE_3_ARGS(
     FunctionTypeParam, Flow,
     NodePtr, name, true,
@@ -778,9 +794,10 @@ ESTREE_NODE_2_ARGS(
     QualifiedTypeofIdentifier, Flow,
     NodePtr, qualification, false,
     NodePtr, id, false)
-ESTREE_NODE_1_ARGS(
+ESTREE_NODE_2_ARGS(
     TupleTypeAnnotation, Flow,
-    NodeList, types, false)
+    NodeList, types, false,
+    NodeBoolean, inexact, false)
 ESTREE_NODE_2_ARGS(
     TupleTypeSpreadElement, Flow,
     NodePtr, label, true,
@@ -826,7 +843,7 @@ ESTREE_NODE_3_ARGS(
     TypePredicate, Flow,
     NodePtr, parameterName, false,
     NodePtr, typeAnnotation, true,
-    NodeBoolean, asserts, false)
+    NodeString, kind, true)
 
 ESTREE_NODE_2_ARGS(
     InterfaceTypeAnnotation, Flow,
@@ -881,6 +898,9 @@ ESTREE_NODE_2_ARGS(
     DeclareFunction, Flow,
     NodePtr, id, false,
     NodePtr, predicate, true)
+ESTREE_NODE_1_ARGS(
+    DeclareHook, Flow,
+    NodePtr, id, false)
 ESTREE_NODE_5_ARGS(
     DeclareComponent, Flow,
     NodePtr, id, false,
@@ -905,11 +925,14 @@ ESTREE_NODE_4_ARGS(
 ESTREE_NODE_1_ARGS(
     DeclareExportAllDeclaration, Flow,
     NodePtr, source, false)
-ESTREE_NODE_3_ARGS(
+ESTREE_NODE_2_ARGS(
     DeclareModule, Flow,
     NodePtr, id, false,
-    NodePtr, body, false,
-    NodeLabel, kind, false)
+    NodePtr, body, false)
+ESTREE_NODE_2_ARGS(
+    DeclareNamespace, Flow,
+    NodePtr, id, false,
+    NodePtr, body, false)
 ESTREE_NODE_1_ARGS(
     DeclareModuleExports, Flow,
     NodePtr, typeAnnotation, false)
@@ -1002,6 +1025,9 @@ ESTREE_NODE_2_ARGS(
     AsExpression, Flow,
     NodePtr, expression, false,
     NodePtr, typeAnnotation, false)
+ESTREE_NODE_1_ARGS(
+    AsConstExpression, Flow,
+    NodePtr, expression, false)
 
 ESTREE_NODE_0_ARGS(InferredPredicate, Flow)
 ESTREE_NODE_1_ARGS(
@@ -1024,6 +1050,11 @@ ESTREE_NODE_3_ARGS(
     NodeBoolean, explicitType, false,
     NodeBoolean, hasUnknownMembers, false)
 ESTREE_NODE_3_ARGS(
+    EnumBigIntBody, Flow,
+    NodeList, members, false,
+    NodeBoolean, explicitType, false,
+    NodeBoolean, hasUnknownMembers, false)
+ESTREE_NODE_3_ARGS(
     EnumBooleanBody, Flow,
     NodeList, members, false,
     NodeBoolean, explicitType, false,
@@ -1042,6 +1073,10 @@ ESTREE_NODE_2_ARGS(
     NodePtr, init, false)
 ESTREE_NODE_2_ARGS(
     EnumNumberMember, Flow,
+    NodePtr, id, false,
+    NodePtr, init, false)
+ESTREE_NODE_2_ARGS(
+    EnumBigIntMember, Flow,
     NodePtr, id, false,
     NodePtr, init, false)
 ESTREE_NODE_2_ARGS(

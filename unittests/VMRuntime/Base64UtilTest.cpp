@@ -127,7 +127,9 @@ TEST_F(Base64UtilTest, DecodeValid) {
   EXPECT_DECODED_ASCII_AND_UTF16("YWI=", u"ab");
   EXPECT_DECODED_ASCII_AND_UTF16("YWJj", u"abc");
   EXPECT_DECODED_ASCII_AND_UTF16("YWJjZA==", u"abcd");
+  EXPECT_DECODED_ASCII_AND_UTF16("YWJjZA", u"abcd");
   EXPECT_DECODED_ASCII_AND_UTF16("YWJjZGU=", u"abcde");
+  EXPECT_DECODED_ASCII_AND_UTF16("YWJjZGU", u"abcde");
   EXPECT_DECODED_ASCII_AND_UTF16("YWJjZGVm", u"abcdef");
   EXPECT_DECODED_ASCII_AND_UTF16("0w==", u"\xD3");
   EXPECT_DECODED_ASCII_AND_UTF16("000=", u"\xD3M");
@@ -148,7 +150,7 @@ TEST_F(Base64UtilTest, DecodeInvalid) {
   CallResult<StringBuilder> builder =
       StringBuilder::createStringBuilder(runtime, outputLength);
 
-  std::array<char, 5> hasNegative = {'A', 'b', 'c', -15, '\0'};
+  std::array<char, 5> hasNegative = {'A', 'b', 'c', (char)-15, '\0'};
   EXPECT_FALSE(base64Decode(createASCIIRef(hasNegative.data()), *builder));
 
   EXPECT_FALSE(base64Decode(createASCIIRef("==="), *builder));

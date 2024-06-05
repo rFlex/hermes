@@ -334,23 +334,6 @@ TEST(HermesRuntimePreparedJavaScriptTest, InvalidSourceThrows) {
       << "prepareJavaScript should have thrown an exception";
 }
 
-TEST(HermesRuntimePreparedJavaScriptTest, InvalidSourceBufferPrefix) {
-  auto rt = makeHermesRuntime();
-  // Construct a 0-terminated buffer that represents an invalid UTF-8 source.
-  char badSource[32];
-  memset((void *)badSource, '\xFE', sizeof(badSource));
-  badSource[31] = 0;
-  std::string prefix = "fefefefefefefefefefefefefefefefe";
-  std::string errMsg;
-  try {
-    rt->prepareJavaScript(std::make_unique<StringBuffer>(badSource), "");
-  } catch (const facebook::jsi::JSIException &err) {
-    errMsg = err.what();
-  }
-  // The error msg should include the prefix of buffer in expected formatting.
-  EXPECT_TRUE(errMsg.find(prefix) != std::string::npos);
-}
-
 TEST_P(HermesRuntimeTest, NoCorruptionOnJSError) {
   // If the test crashes or infinite loops, the likely cause is that
   // Hermes API library is not built with proper compiler flags
@@ -461,23 +444,28 @@ TEST(HermesWatchTimeLimitTest, WatchTimeLimit) {
   }
 }
 
-TEST(HermesTriggerAsyncTimeoutTest, TriggerAsyncTimeout) {
-  // Some code that loops forever to exercise the async interrupt.
-  const char *forEver = "for (;;){}";
-  uint32_t ShortTimeoutMS = 123;
-  {
-    auto rt = makeHermesRuntime(hermes::vm::RuntimeConfig::Builder()
-                                    .withAsyncBreakCheckInEval(true)
-                                    .build());
-    std::thread t([&]() {
-      std::this_thread::sleep_for(std::chrono::milliseconds(ShortTimeoutMS));
-      rt->asyncTriggerTimeout();
-    });
-    ASSERT_THROW(
-        rt->evaluateJavaScript(std::make_unique<StringBuffer>(forEver), ""),
-        JSIException);
-    t.join();
-  }
+TEST_P(HermesRuntimeTest, TriggerAsyncTimeout) {
+  auto runTest = [](auto *rt) {
+    // Some code that loops forever to exercise the async interrupt.
+    const char *forEver = "for (;;){}";
+    uint32_t ShortTimeoutMS = 123;
+    {
+      std::thread t([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(ShortTimeoutMS));
+        rt->asyncTriggerTimeout();
+      });
+      ASSERT_THROW(
+          rt->evaluateJavaScript(std::make_unique<StringBuffer>(forEver), ""),
+          JSIException);
+      t.join();
+    }
+  };
+
+  // Only these runtimes support asyncTriggerTimeout.
+  if (auto *hrt = dynamic_cast<HermesRuntime *>(rt.get()))
+    runTest(hrt);
+  else if (auto *hsrt = dynamic_cast<HermesSandboxRuntime *>(rt.get()))
+    runTest(hsrt);
 }
 
 TEST(HermesRuntimeCrashManagerTest, CrashGetStackTrace) {

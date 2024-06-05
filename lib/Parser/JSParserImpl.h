@@ -298,15 +298,16 @@ class JSParserImpl {
 
   UniqueString *checksIdent_;
   UniqueString *assertsIdent_;
+  UniqueString *impliesIdent_;
 
   UniqueString *componentIdent_;
+  UniqueString *hookIdent_;
   UniqueString *rendersIdent_;
   UniqueString *rendersMaybeOperator_;
   UniqueString *rendersStarOperator_;
 #endif
 
 #if HERMES_PARSE_TS
-  UniqueString *namespaceIdent_;
   UniqueString *readonlyIdent_;
   UniqueString *neverIdent_;
   UniqueString *undefinedIdent_;
@@ -314,11 +315,10 @@ class JSParserImpl {
 #endif
 
 #if HERMES_PARSE_FLOW || HERMES_PARSE_TS
+  UniqueString *namespaceIdent_;
   UniqueString *isIdent_;
-#endif
-
-#if HERMES_PARSE_FLOW || HERMES_PARSE_TS
   UniqueString *inferIdent_;
+  UniqueString *constIdent_;
 #endif
 
   /// String representation of all tokens.
@@ -513,18 +513,32 @@ class JSParserImpl {
   /// Check whether the current token begins a Declaration.
   bool checkDeclaration() {
     if (checkN(
-            TokenKind::rw_function,
-            letIdent_,
-            TokenKind::rw_const,
-            TokenKind::rw_class) ||
+            TokenKind::rw_function, TokenKind::rw_const, TokenKind::rw_class) ||
         (check(asyncIdent_) && checkAsyncFunction())) {
       return true;
+    }
+
+    if (check(letIdent_)) {
+      if (isStrictMode()) {
+        return true;
+      }
+      // In loose mode, 'let' requires more work to check.
+      // let Identifier
+      // let [
+      // let {
+      // are all starts of 'let' declarations.
+      // But 'let' can also be an Identifier in loose mode.
+      return lexer_.isLetFollowedByDeclStart();
     }
 
 #if HERMES_PARSE_FLOW
     if (context_.getParseFlow()) {
       if (context_.getParseFlowComponentSyntax() &&
           checkComponentDeclarationFlow()) {
+        return true;
+      }
+      if (context_.getParseFlowComponentSyntax() &&
+          checkHookDeclarationFlow()) {
         return true;
       }
       if (check(opaqueIdent_)) {
@@ -1143,17 +1157,14 @@ class JSParserImpl {
       Optional<SMLoc> wrappedStart = None,
       AllowAnonFunctionType allowAnonFunctionType = AllowAnonFunctionType::Yes);
 
-  /// Allow 'declare export type', which is only allowed in 'declare module'.
-  enum class AllowDeclareExportType { No, Yes };
-
   Optional<ESTree::Node *> parseFlowDeclaration();
-  Optional<ESTree::Node *> parseDeclareFLow(
-      SMLoc start,
-      AllowDeclareExportType allowDeclareExportType);
+  Optional<ESTree::Node *> parseDeclareFLow(SMLoc start);
   bool checkComponentDeclarationFlow();
   Optional<ESTree::Node *> parseComponentDeclarationFlow(
       SMLoc start,
       bool declare);
+  bool checkHookDeclarationFlow();
+  Optional<ESTree::Node *> parseHookDeclarationFlow(SMLoc start);
 
   /// This is for parsing the `renders` clause that comes after component
   /// declarations, declared components, and component types, but not for
@@ -1196,11 +1207,14 @@ class JSParserImpl {
   bool parseInterfaceExtends(SMLoc start, ESTree::NodeList &extends);
 
   Optional<ESTree::Node *> parseDeclareFunctionFlow(SMLoc start);
-  Optional<ESTree::Node *> parseDeclareClassFlow(SMLoc start);
-  Optional<ESTree::Node *> parseDeclareExportFlow(
+  Optional<ESTree::Node *> parseDeclareHookFlow(SMLoc start);
+  Optional<ESTree::Node *> parseDeclareFunctionOrHookFlow(
       SMLoc start,
-      AllowDeclareExportType allowDeclareExportType);
+      bool hook);
+  Optional<ESTree::Node *> parseDeclareClassFlow(SMLoc start);
+  Optional<ESTree::Node *> parseDeclareExportFlow(SMLoc start);
   Optional<ESTree::Node *> parseDeclareModuleFlow(SMLoc start);
+  Optional<ESTree::Node *> parseDeclareNamespaceFlow(SMLoc start);
 
   Optional<ESTree::Node *> parseExportTypeDeclarationFlow(SMLoc start);
 
@@ -1213,14 +1227,20 @@ class JSParserImpl {
   Optional<ESTree::Node *> parsePrimaryTypeAnnotationFlow();
   Optional<ESTree::Node *> parseTypeofTypeAnnotationFlow();
   Optional<ESTree::Node *> parseTupleTypeAnnotationFlow();
-  Optional<ESTree::Node *> parseTupleElementFlow();
+  // \param startsWithDotDotDot whether the element started with '...'
+  Optional<ESTree::Node *> parseTupleElementFlow(
+      SMLoc startLoc,
+      bool startsWithDotDotDot);
   Optional<ESTree::Node *> parseFunctionTypeAnnotationFlow();
+  Optional<ESTree::Node *> parseHookTypeAnnotationFlow();
+  Optional<ESTree::Node *> parseFunctionOrHookTypeAnnotationFlow(bool hook);
   Optional<ESTree::Node *> parseFunctionTypeAnnotationWithParamsFlow(
       SMLoc start,
       ESTree::NodeList &&params,
       ESTree::Node *thisConstraint,
       ESTree::Node *rest,
-      ESTree::Node *typeParams);
+      ESTree::Node *typeParams,
+      bool hook);
   Optional<ESTree::Node *> parseFunctionOrGroupTypeAnnotationFlow();
 
   /// Whether to allow 'proto' properties in an object type annotation.
@@ -1290,7 +1310,9 @@ class JSParserImpl {
   Optional<ESTree::FunctionTypeParamNode *>
   parseFunctionTypeAnnotationParamsFlow(
       ESTree::NodeList &params,
-      ESTree::NodePtr &thisConstraint);
+      ESTree::NodePtr &thisConstraint,
+      bool hook);
+  Optional<ESTree::FunctionTypeParamNode *> parseHookTypeAnnotationParamFlow();
   Optional<ESTree::FunctionTypeParamNode *>
   parseFunctionTypeAnnotationParamFlow();
 
@@ -1324,6 +1346,7 @@ class JSParserImpl {
   enum class EnumKind {
     String,
     Number,
+    BigInt,
     Boolean,
     Symbol,
   };
@@ -1334,6 +1357,8 @@ class JSParserImpl {
         return "string";
       case EnumKind::Number:
         return "number";
+      case EnumKind::BigInt:
+        return "bigint";
       case EnumKind::Boolean:
         return "boolean";
       case EnumKind::Symbol:
@@ -1348,6 +1373,8 @@ class JSParserImpl {
         return EnumKind::String;
       case ESTree::NodeKind::EnumNumberMember:
         return EnumKind::Number;
+      case ESTree::NodeKind::EnumBigIntMember:
+        return EnumKind::BigInt;
       case ESTree::NodeKind::EnumBooleanMember:
         return EnumKind::Boolean;
       default:

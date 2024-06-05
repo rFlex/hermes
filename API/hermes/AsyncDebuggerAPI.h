@@ -19,7 +19,18 @@
 #include <hermes/DebuggerAPI.h>
 #include <hermes/Public/HermesExport.h>
 #include <hermes/hermes.h>
-#include <hermes/inspector/chrome/ThreadSafetyAnalysis.h>
+
+#if defined(__clang__) && (!defined(SWIG)) && \
+    defined(_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS)
+#include <hermes/ThreadSafetyAnalysis.h>
+#else
+#ifndef TSA_GUARDED_BY
+#define TSA_GUARDED_BY(x)
+#endif
+#ifndef TSA_NO_THREAD_SAFETY_ANALYSIS
+#define TSA_NO_THREAD_SAFETY_ANALYSIS
+#endif
+#endif
 
 namespace facebook {
 namespace hermes {
@@ -32,7 +43,6 @@ enum class DebuggerEventType {
   ScriptLoaded, /// A script file was loaded, and the debugger has requested
   /// pausing after script load.
   Exception, /// An Exception was thrown.
-  EvalComplete, /// An eval() function finished.
   Resumed, /// Script execution has resumed.
 
   // Events Requiring Next Command
@@ -42,6 +52,18 @@ enum class DebuggerEventType {
   ExplicitPause, /// A pause requested using Explicit AsyncBreak
 };
 
+/// This represents the list of possible commands that can be given to
+/// \p resumeFromPaused. This is used instead of DebuggerAPI's Command class in
+/// order to prevent callers from constructing an eval Command. The eval
+/// functionality is implemented as a separate mechansim with
+/// \p evalWhilePaused.
+enum class AsyncDebugCommand {
+  Continue, /// Continues execution
+  StepInto, /// Perform a step into and then pause again
+  StepOver, /// Steps over the current instruction and then pause again
+  StepOut, /// Step out from the current scope and then pause again
+};
+
 using DebuggerEventCallback = std::function<void(
     HermesRuntime &runtime,
     AsyncDebuggerAPI &asyncDebugger,
@@ -49,6 +71,8 @@ using DebuggerEventCallback = std::function<void(
 using DebuggerEventCallbackID = uint32_t;
 constexpr const uint32_t kInvalidDebuggerEventCallbackID = 0;
 using InterruptCallback = std::function<void(HermesRuntime &runtime)>;
+using EvalCompleteCallback = std::function<
+    void(HermesRuntime &runtime, const debugger::EvalResult &result)>;
 
 /// This class wraps the DebuggerAPI to expose an asynchronous didPause
 /// functionality as well as an interrupt API. This class must be constructed at
@@ -70,13 +94,18 @@ class HERMES_EXPORT AsyncDebuggerAPI : private debugger::EventObserver {
   /// Must be destroyed on the runtime thread or when you're sure nothing is
   /// interacting with the runtime. Must be destroyed before destroying
   /// HermesRuntime.
-  ~AsyncDebuggerAPI();
+  ~AsyncDebuggerAPI() override;
 
   /// Add a callback function to invoke when the runtime pauses due to various
   /// conditions such as hitting a "debugger;" statement. Can be called from any
   /// thread. If there are no DebuggerEventCallback, then any reason that might
   /// trigger a pause, such as a "debugger;" statement or breakpoints, will not
-  /// actually pause and will simply continue execution.
+  /// actually pause and will simply continue execution. Any caller that adds an
+  /// event callback cannot just be observing events and never call
+  /// \p resumeFromPaused in any of its code paths. The caller must either
+  /// expose UI enabling human action for controlling the debugger, or it must
+  /// have programmatic logic that controls the debugger via
+  /// \p resumeFromPaused.
   DebuggerEventCallbackID addDebuggerEventCallback_TS(
       DebuggerEventCallback callback);
 
@@ -84,13 +113,27 @@ class HERMES_EXPORT AsyncDebuggerAPI : private debugger::EventObserver {
   /// registered using the provided \p id, the function does nothing.
   void removeDebuggerEventCallback_TS(DebuggerEventCallbackID id);
 
-  /// Whether the runtime is currently paused waiting for the next
-  /// debugger::Command. Should only be called from the runtime thread.
+  /// Whether the runtime is currently paused waiting for the next action.
+  /// Should only be called from the runtime thread.
   bool isWaitingForCommand();
 
-  /// Provide the next debugger::Command. Should only be called from the runtime
+  /// Whether the runtime is currently paused for any reason (e.g. script
+  /// parsed, running interrupts, or waiting for a command).
+  /// Should only be called from the runtime thread.
+  bool isPaused();
+
+  /// Provide the next action to perform. Should only be called from the runtime
   /// thread and only if the next command is expected to be set.
-  void setNextCommand(debugger::Command command);
+  bool resumeFromPaused(AsyncDebugCommand command);
+
+  /// Evaluate JavaScript code \p expression in the frame at index
+  /// \p frameIndex. Receives evaluation result in the \p callback. Should only
+  /// be called from the runtime thread and only if debugger is paused waiting
+  /// for the next action.
+  bool evalWhilePaused(
+      const std::string &expression,
+      uint32_t frameIndex,
+      EvalCompleteCallback callback);
 
   /// Request to interrupt the runtime at a convenient time and get a callback
   /// on the runtime thread. Guaranteed to run "exactly once". This function can
@@ -115,8 +158,10 @@ class HERMES_EXPORT AsyncDebuggerAPI : private debugger::EventObserver {
   /// Dequeues the next InterruptCallback if any.
   std::optional<InterruptCallback> takeNextInterruptCallback();
 
-  /// Runs every InterruptCallback that has been queued up so far.
-  void runInterrupts();
+  /// If \p ignoreNextCommand is true, then runs every InterruptCallback that
+  /// has been queued up so far. If \p ignoreNextCommand is false, then attempt
+  /// to run all interrupts, but will stop if any interrupt sets a next command.
+  void runInterrupts(bool ignoreNextCommand = true);
 
   /// Returns the next DebuggerEventCallback to execute if any.
   std::optional<DebuggerEventCallback> takeNextEventCallback();
@@ -127,11 +172,15 @@ class HERMES_EXPORT AsyncDebuggerAPI : private debugger::EventObserver {
   HermesRuntime &runtime_;
 
   /// Whether the runtime thread is currently paused in \p didPause and needs to
-  /// be told what debugger::Command to use next.
+  /// be told what action to take next.
   bool isWaitingForCommand_;
 
   /// Stores the command to return from \p didPause.
   debugger::Command nextCommand_;
+
+  /// Callback function to invoke after getting EvalResult from EvalComplete in
+  /// didPause. Used once and then cleared out.
+  EvalCompleteCallback oneTimeEvalCompleteCallback_{};
 
   /// Tracks whether we are already in a didPause callback to detect recursive
   /// calls to didPause.
@@ -183,7 +232,6 @@ enum class DebuggerEventType {
   ScriptLoaded, /// A script file was loaded, and the debugger has requested
   /// pausing after script load.
   Exception, /// An Exception was thrown.
-  EvalComplete, /// An eval() function finished.
   Resumed, /// Script execution has resumed.
 
   // Events Requiring Next Command
@@ -193,6 +241,18 @@ enum class DebuggerEventType {
   ExplicitPause, /// A pause requested using Explicit AsyncBreak
 };
 
+/// This represents the list of possible commands that can be given to
+/// \p resumeFromPaused. This is used instead of DebuggerAPI's Command class in
+/// order to prevent callers from constructing an eval Command. The eval
+/// functionality is implemented as a separate mechansim with
+/// \p evalWhilePaused.
+enum class AsyncDebugCommand {
+  Continue, /// Continues execution
+  StepInto, /// Perform a step into and then pause again
+  StepOver, /// Steps over the current instruction and then pause again
+  StepOut, /// Step out from the current scope and then pause again
+};
+
 using DebuggerEventCallback = std::function<void(
     HermesRuntime &runtime,
     AsyncDebuggerAPI &asyncDebugger,
@@ -200,6 +260,8 @@ using DebuggerEventCallback = std::function<void(
 using DebuggerEventCallbackID = uint32_t;
 constexpr const uint32_t kInvalidDebuggerEventCallbackID = 0;
 using InterruptCallback = std::function<void(HermesRuntime &runtime)>;
+using EvalCompleteCallback = std::function<
+    void(HermesRuntime &runtime, const debugger::EvalResult &result)>;
 
 class HERMES_EXPORT AsyncDebuggerAPI {
  public:
@@ -220,7 +282,20 @@ class HERMES_EXPORT AsyncDebuggerAPI {
     return false;
   }
 
-  void setNextCommand(debugger::Command command) {}
+  bool isPaused() {
+    return false;
+  }
+
+  bool resumeFromPaused(AsyncDebugCommand command) {
+    return false;
+  }
+
+  bool evalWhilePaused(
+      const std::string &expression,
+      uint32_t frameIndex,
+      EvalCompleteCallback callback) {
+    return false;
+  }
 
   void triggerInterrupt_TS(InterruptCallback callback) {}
 };

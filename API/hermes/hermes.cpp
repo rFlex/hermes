@@ -183,7 +183,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
     compileFlags_.enableBlockScoping = runtimeConfig.getEnableBlockScoping();
     compileFlags_.enableGenerator = runtimeConfig.getEnableGenerator();
     compileFlags_.enableES6Classes = runtimeConfig.getES6Class();
-    compileFlags_.emitAsyncBreakCheck = defaultEmitAsyncBreakCheck_ =
+    compileFlags_.emitAsyncBreakCheck =
         runtimeConfig.getAsyncBreakCheckInEval();
     runtime_.addCustomRootsFunction(
         [this](vm::GC *, vm::RootAcceptor &acceptor) {
@@ -579,6 +579,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::Value evaluateJavaScript(
       const std::shared_ptr<const jsi::Buffer> &buffer,
       const std::string &sourceURL) override;
+  void queueMicrotask(const jsi::Function &callback) override;
   bool drainMicrotasks(int maxMicrotasksHint = -1) override;
   jsi::Object global() override;
 
@@ -866,7 +867,18 @@ class HermesRuntimeImpl final : public HermesRuntime,
 
     // Determine whether the element is occupied by inspecting the refcount.
     bool isFree() const {
+      // In general, it is safe to use relaxed operations here because there
+      // will be a control dependency between this load and any store that needs
+      // to be ordered. However, TSAN does not analyse control dependencies,
+      // since they are technically not part of C++, so use acquire under TSAN
+      // to enforce the ordering of subsequent writes resulting from deleting a
+      // freed element. (see the comment on dec() for more information)
+
+#if LLVM_THREAD_SANITIZER_BUILD
+      return refCount_.load(std::memory_order_acquire) == 0;
+#else
       return refCount_.load(std::memory_order_relaxed) == 0;
+#endif
     }
 
     // Store a value and start the refcount at 1. After invocation, this
@@ -906,7 +918,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
     void invalidate() override {
 #ifdef ASSERT_ON_DANGLING_VM_REFS
       assert(
-          ((1 << 31) & refCount_) == 0 &&
+          ((1u << 31) & refCount_) == 0 &&
           "This PointerValue was left dangling after the Runtime was destroyed.");
 #endif
       dec();
@@ -932,7 +944,14 @@ class HermesRuntimeImpl final : public HermesRuntime,
       // this value to be freed. We get this ordering from the fact that the
       // vtable read and the reference count update form a load-store control
       // dependency, which preserves their ordering on any reasonable hardware.
+      // TSAN does not analyse control dependencies, so we use release under
+      // TSAN to enforce the ordering of the preceding vtable load.
+
+#if LLVM_THREAD_SANITIZER_BUILD
+      auto oldCount = refCount_.fetch_sub(1, std::memory_order_release);
+#else
       auto oldCount = refCount_.fetch_sub(1, std::memory_order_relaxed);
+#endif
       assert(oldCount > 0 && "Ref count underflow");
       (void)oldCount;
     }
@@ -944,7 +963,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
       // dangling. Setting the second-top bit ensures that accidental
       // over-calling the dec() function doesn't clear the top bit without
       // complicating the implementation of dec().
-      refCount_ |= 0b11 << 30;
+      refCount_ |= 0b11u << 30;
     }
 #endif
 
@@ -1032,8 +1051,6 @@ class HermesRuntimeImpl final : public HermesRuntime,
 
   /// Compilation flags used by prepareJavaScript().
   ::hermes::hbc::CompileFlags compileFlags_{};
-  /// The default setting of "emit async break check" in this runtime.
-  bool defaultEmitAsyncBreakCheck_{false};
 };
 
 namespace {
@@ -1084,9 +1101,9 @@ std::pair<const uint8_t *, size_t> HermesRuntime::getBytecodeEpilogue(
   return std::make_pair(epi.data(), epi.size());
 }
 
-void HermesRuntime::enableSamplingProfiler() {
+void HermesRuntime::enableSamplingProfiler(double meanHzFreq) {
 #if HERMESVM_SAMPLING_PROFILER_AVAILABLE
-  ::hermes::vm::SamplingProfiler::enable();
+  ::hermes::vm::SamplingProfiler::enable(meanHzFreq);
 #else
   throwHermesNotCompiledWithSamplingProfilerSupport();
 #endif // HERMESVM_SAMPLING_PROFILER_AVAILABLE
@@ -1345,7 +1362,6 @@ void HermesRuntime::watchTimeLimit(uint32_t timeoutInMs) {
   vm::Runtime &runtime = concrete.runtime_;
   auto &runtimeTimeLimitMonitor = runtime.timeLimitMonitor;
   if (!runtimeTimeLimitMonitor) {
-    concrete.compileFlags_.emitAsyncBreakCheck = true;
     runtimeTimeLimitMonitor = ::hermes::vm::TimeLimitMonitor::getOrCreate();
   }
   runtimeTimeLimitMonitor->watchRuntime(
@@ -1419,11 +1435,6 @@ HermesRuntimeImpl::prepareJavaScriptWithSourceMap(
   hermesLog(
       "HermesVM", "Prepare JS on %s.", isBytecode ? "bytecode" : "source");
 #endif
-  // Save the first few bytes of the buffer so that we can later append them
-  // to any error message.
-  uint8_t bufPrefix[16];
-  const size_t bufSize = buffer->size();
-  memcpy(bufPrefix, buffer->data(), std::min(sizeof(bufPrefix), bufSize));
 
   // Construct the BC provider either from buffer or source.
   if (isBytecode) {
@@ -1458,24 +1469,9 @@ HermesRuntimeImpl::prepareJavaScriptWithSourceMap(
 #endif
   }
   if (!bcErr.first) {
-    std::string storage;
-    llvh::raw_string_ostream os(storage);
-    os << " Buffer size " << bufSize << " starts with: ";
-    for (size_t i = 0; i < sizeof(bufPrefix) && i < bufSize; ++i)
-      os << llvh::format_hex_no_prefix(bufPrefix[i], 2);
-    std::string bufferModes = "";
-    for (const auto &mode : ::hermes::oscompat::get_vm_protect_modes(
-             jsiBuffer->data(), jsiBuffer->size())) {
-      // We only expect one match, but if there are multiple, we want to know.
-      bufferModes += mode;
-    }
-    if (!bufferModes.empty()) {
-      os << " and has protection mode(s): " << bufferModes;
-    }
-    LOG_EXCEPTION_CAUSE(
-        "Compiling JS failed: %s, %s", bcErr.second.c_str(), os.str().c_str());
+    LOG_EXCEPTION_CAUSE("Compiling JS failed: %s", bcErr.second.c_str());
     throw jsi::JSINativeException(
-        "Compiling JS failed: " + std::move(bcErr.second) + os.str());
+        "Compiling JS failed: " + std::move(bcErr.second));
   }
   return std::make_shared<const HermesPreparedJavaScript>(
       std::move(bcErr.first), runtimeFlags, std::move(sourceURL));
@@ -1509,6 +1505,17 @@ jsi::Value HermesRuntimeImpl::evaluateJavaScript(
     const std::shared_ptr<const jsi::Buffer> &buffer,
     const std::string &sourceURL) {
   return evaluateJavaScriptWithSourceMap(buffer, nullptr, sourceURL);
+}
+
+void HermesRuntimeImpl::queueMicrotask(const jsi::Function &callback) {
+  if (LLVM_UNLIKELY(!runtime_.hasMicrotaskQueue())) {
+    throw jsi::JSINativeException(
+        "Could not enqueue microtask because they are disabled in this runtime");
+  }
+
+  vm::Handle<vm::Callable> handle =
+      vm::Handle<vm::Callable>::vmcast(&phv(callback));
+  runtime_.enqueueJob(handle.get());
 }
 
 bool HermesRuntimeImpl::drainMicrotasks(int maxMicrotasksHint) {
@@ -2427,11 +2434,6 @@ vm::RuntimeConfig hardenedHermesRuntimeConfig() {
 
   // Enabled hardening options.
   config.withRandomizeMemoryLayout(true);
-
-  // This flag is misnamed - it doesn't only apply to eval() calls but to
-  // all compilation performed by the HermesRuntime, so it should be enabled
-  // even when eval() is disabled, to ensure that watchTimeLimit works.
-  config.withAsyncBreakCheckInEval(true);
   return config.build();
 }
 
@@ -2461,7 +2463,7 @@ std::unique_ptr<HermesRuntime> makeHermesRuntime(
   // the setter and not using make_unique, so the call to new is here
   // in this function, which is a friend of debugger::Debugger.
   ret->setDebugger(std::unique_ptr<debugger::Debugger>(
-      new debugger::Debugger(ret.get(), &(ret->runtime_.getDebugger()))));
+      new debugger::Debugger(ret.get(), ret->runtime_)));
 #else
   ret->setDebugger(std::make_unique<debugger::Debugger>());
 #endif
@@ -2511,7 +2513,7 @@ std::unique_ptr<jsi::ThreadSafeRuntime> makeThreadSafeHermesRuntime(
   // the setter and not using make_unique, so the call to new is here
   // in this function, which is a friend of debugger::Debugger.
   hermesRt.setDebugger(std::unique_ptr<debugger::Debugger>(
-      new debugger::Debugger(&hermesRt, &(hermesRt.runtime_.getDebugger()))));
+      new debugger::Debugger(&hermesRt, hermesRt.runtime_)));
 #else
   hermesRt.setDebugger(std::make_unique<debugger::Debugger>());
 #endif

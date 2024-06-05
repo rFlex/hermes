@@ -14,3 +14,22 @@ extern "C" int getentropy_impl(void *buffer, size_t length)
 extern "C" int getentropy(void *buffer, size_t length) {
   return getentropy_impl(buffer, length);
 }
+
+extern "C" bool test_timeout_impl() __attribute__((
+    import_module("hermes_import"),
+    import_name("test_timeout")));
+extern "C" bool test_wasm_host_timeout() {
+  return test_timeout_impl();
+}
+
+extern "C" bool test_and_clear_timeout_impl() __attribute__((
+    import_module("hermes_import"),
+    import_name("test_and_clear_timeout")));
+extern "C" bool test_and_clear_wasm_host_timeout() {
+  return test_and_clear_timeout_impl();
+}
+
+extern "C" char __global_base;
+extern "C" char *get_global_base() {
+  return &__global_base;
+}

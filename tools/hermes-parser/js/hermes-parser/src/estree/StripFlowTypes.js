@@ -33,6 +33,7 @@ export function transformProgram(
     transform(node: ESNode) {
       switch (node.type) {
         case 'AsExpression':
+        case 'AsConstExpression':
         case 'TypeCastExpression': {
           return node.expression;
         }
@@ -59,6 +60,7 @@ export function transformProgram(
         case 'DeclareInterface':
         case 'DeclareModule':
         case 'DeclareModuleExports':
+        case 'DeclareNamespace':
         case 'DeclareOpaqueType':
         case 'DeclareTypeAlias':
         case 'DeclareVariable':

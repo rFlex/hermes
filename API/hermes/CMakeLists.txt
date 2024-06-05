@@ -7,13 +7,13 @@
 add_hermes_library(compileJS CompileJS.cpp LINK_LIBS hermesPublic hermesHBCBackend)
 
 if(HERMES_ENABLE_DEBUGGER)
-  if(HERMES_ENABLE_TOOLS AND NOT WIN32)
-    add_subdirectory(inspector/chrome/cli)
-  endif()
-
   # Some inspector sources need to be built without RTTI because they consume
   # internal data structures compiled without RTTI.
   set(INSPECTOR_NO_EH_RTTI_SOURCES
+    cdp/JSONValueInterfaces.cpp
+    cdp/MessageConverters.cpp
+    cdp/MessageInterfaces.cpp
+    cdp/MessageTypes.cpp
     inspector/chrome/JSONValueInterfaces.cpp
     inspector/chrome/MessageConverters.cpp
     inspector/chrome/MessageInterfaces.cpp
@@ -30,12 +30,28 @@ if(HERMES_ENABLE_DEBUGGER)
     endif ()
   endif ()
 
+  set(CDP_API_SOURCES
+    cdp/CDPAgent.cpp
+    cdp/CallbackOStream.cpp
+    cdp/ConsoleMessage.cpp
+    cdp/DebuggerDomainAgent.cpp
+    cdp/HeapProfilerDomainAgent.cpp
+    cdp/ProfilerDomainAgent.cpp
+    cdp/RemoteObjectConverters.cpp
+    cdp/RemoteObjectsTable.cpp
+    cdp/RuntimeDomainAgent.cpp
+    cdp/ConsoleMessage.cpp
+    cdp/CDPDebugAPI.cpp
+    cdp/DomainState.cpp
+  )
+
   set(INSPECTOR_API_SOURCES
     inspector/chrome/CallbackOStream.cpp
     inspector/chrome/CDPHandler.cpp
     inspector/chrome/RemoteObjectConverters.cpp
     inspector/chrome/RemoteObjectsTable.cpp
     inspector/RuntimeAdapter.cpp
+    ${CDP_API_SOURCES}
     ${INSPECTOR_NO_EH_RTTI_SOURCES}
   )
 
@@ -48,12 +64,15 @@ add_hermes_library(synthTraceParser SynthTraceParser.cpp LINK_LIBS hermesSupport
 # All remaining targets in this file use both exceptions and RTTI.
 set(HERMES_ENABLE_EH_RTTI ON)
 
+add_subdirectory(cdp)
+
 # List the files that define exported functions explicitly, and they can link
 # against the internal functionality they need.
 set(api_sources
   hermes.cpp
   DebuggerAPI.cpp
   AsyncDebuggerAPI.cpp
+  RuntimeTaskRunner.cpp
   ${INSPECTOR_API_SOURCES}
   )
 
@@ -61,9 +80,13 @@ file(GLOB api_headers ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
 file(GLOB api_public_headers ${PROJECT_SOURCE_DIR}/public/hermes/Public/*.h)
 
 if(HERMES_THREAD_SAFETY_ANALYSIS)
+  set(TSA_SOURCES
+    AsyncDebuggerAPI.cpp
+    ${CDP_API_SOURCES}
+  )
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    set_property(SOURCE AsyncDebuggerAPI.cpp APPEND_STRING PROPERTY
-      COMPILE_FLAGS "-Wthread-safety -Werror=thread-safety-analysis -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS")
+    set_property(SOURCE ${TSA_SOURCES} APPEND_STRING PROPERTY
+      COMPILE_FLAGS "-Wthread-safety -Werror=thread-safety-analysis -Werror=thread-safety-precise -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS")
   endif()
 endif()
 
@@ -125,6 +148,14 @@ if(APPLE AND HERMES_BUILD_APPLE_FRAMEWORK)
   elseif(HERMES_APPLE_TARGET_PLATFORM MATCHES "macos")
     add_custom_command(TARGET libhermes POST_BUILD
       COMMAND /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:libhermes>/Resources/Info.plist
+    )
+  elseif(HERMES_APPLE_TARGET_PLATFORM MATCHES "xr")
+    if(CMAKE_VERSION VERSION_LESS 3.28.4)
+      message("VisionOS Simulator requires CMake version >= 3.28.4")
+    endif()
+
+    add_custom_command(TARGET libhermes POST_BUILD
+      COMMAND /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${CMAKE_OSX_DEPLOYMENT_TARGET}" $<TARGET_FILE_DIR:libhermes>/Info.plist
     )
   endif()
 endif()

@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "hermes/Support/StackOverflowGuard.h"
 #define DEBUG_TYPE "vm"
 #include "hermes/VM/Runtime.h"
 
@@ -60,6 +61,19 @@
 #ifdef HERMES_COMPILER_SUPPORTS_WSHORTEN_64_TO_32
 #pragma GCC diagnostic ignored "-Wshorten-64-to-32"
 #endif
+
+#ifdef __EMSCRIPTEN__
+/// Provide implementations with weak linkage that can serve as the default in a
+/// wasm build, while allowing them to be overridden depending on the target.
+/// Since Emscripten will effectively LTO, these should be inlined.
+__attribute__((__weak__)) extern "C" bool test_wasm_host_timeout() {
+  return false;
+}
+__attribute__((__weak__)) extern "C" bool test_and_clear_wasm_host_timeout() {
+  return false;
+}
+#endif
+
 namespace hermes {
 namespace vm {
 
@@ -252,9 +266,12 @@ Runtime::Runtime(
       stackPointer_(),
       crashMgr_(runtimeConfig.getCrashMgr()),
 #ifdef HERMES_CHECK_NATIVE_STACK
-      nativeStackGap_(std::max(
+      overflowGuard_(StackOverflowGuard::nativeStackGuard(std::max(
           runtimeConfig.getNativeStackGap(),
-          kMinSupportedNativeStackGap)),
+          kMinSupportedNativeStackGap))),
+#else
+      overflowGuard_(StackOverflowGuard::depthCounterGuard(
+          Runtime::MAX_NATIVE_CALL_FRAME_DEPTH)),
 #endif
       crashCallbackKey_(
           crashMgr_->registerCallback([this](int fd) { crashCallback(fd); })),
@@ -404,6 +421,16 @@ Runtime::~Runtime() {
 #endif // HERMESVM_SAMPLING_PROFILER_AVAILABLE
 
   getHeap().finalizeAll();
+  // Remove inter-module dependencies so we can delete them in any order.
+  for (auto &module : runtimeModuleList_) {
+    module.prepareForDestruction();
+  }
+  // All RuntimeModules must be destroyed before the next assertion, to untrack
+  // all native IDs related to it (e.g., CodeBlock).
+  while (!runtimeModuleList_.empty()) {
+    // Calling delete will automatically remove it from the list.
+    delete &runtimeModuleList_.back();
+  }
   // Now that all objects are finalized, there shouldn't be any native memory
   // keys left in the ID tracker for memory profiling. Assert that the only IDs
   // left are JS heap pointers.
@@ -417,19 +444,10 @@ Runtime::~Runtime() {
     oscompat::vm_free(
         registerStackAllocation_.data(), registerStackAllocation_.size());
   }
-  // Remove inter-module dependencies so we can delete them in any order.
-  for (auto &module : runtimeModuleList_) {
-    module.prepareForRuntimeShutdown();
-  }
 
   assert(
       !formattingStackTrace_ &&
       "Runtime is being destroyed while exception is being formatted");
-
-  while (!runtimeModuleList_.empty()) {
-    // Calling delete will automatically remove it from the list.
-    delete &runtimeModuleList_.back();
-  }
 
   // Unwatch the runtime from the time limit monitor in case the latter still
   // has any references to this.
@@ -640,6 +658,9 @@ void Runtime::markRoots(
 void Runtime::markWeakRoots(WeakRootAcceptor &acceptor, bool markLongLived) {
   MarkRootsPhaseTimer timer(*this, RootAcceptor::Section::WeakRefs);
   acceptor.beginRootSection(RootAcceptor::Section::WeakRefs);
+  // Call this first so that it can remove RuntimeModules whose owning Domain is
+  // dead from runtimeModuleList_, before marking long-lived WeakRoots in them.
+  markDomainRefInRuntimeModules(acceptor);
   if (markLongLived) {
     for (auto &entry : fixedPropCache_) {
       acceptor.acceptWeak(entry.clazz);
@@ -647,11 +668,34 @@ void Runtime::markWeakRoots(WeakRootAcceptor &acceptor, bool markLongLived) {
     for (auto &rm : runtimeModuleList_)
       rm.markLongLivedWeakRoots(acceptor);
   }
-  for (auto &rm : runtimeModuleList_)
-    rm.markDomainRef(acceptor);
   for (auto &fn : customMarkWeakRootFuncs_)
     fn(&getHeap(), acceptor);
   acceptor.endRootSection();
+}
+
+void Runtime::markDomainRefInRuntimeModules(WeakRootAcceptor &acceptor) {
+  std::vector<RuntimeModule *> modulesToDelete;
+  for (auto &rm : runtimeModuleList_) {
+    rm.markDomainRef(acceptor);
+    // If the owning domain is dead, store the RuntimeModule pointer for
+    // destruction later.
+    if (LLVM_UNLIKELY(rm.isOwningDomainDead())) {
+      // Prepare these RuntimeModules for destruction so that we don't rely on
+      // their relative order in runtimeModuleList_.
+      rm.prepareForDestruction();
+      modulesToDelete.push_back(&rm);
+    }
+  }
+
+  // We need to destroy these RuntimeModules after we call
+  // prepareForDestruction() on all of them, otherwise, it may cause
+  // use-after-free when checking the ownership of a CodeBlock in the destructor
+  // of a RuntimeModule (which may refer a CodeBlock that is owned and deleted
+  // by another RuntimeModule).
+  for (auto *rm : modulesToDelete) {
+    // Calling delete will automatically remove it from the list.
+    delete rm;
+  }
 }
 
 void Runtime::markRootsForCompleteMarking(
@@ -1947,19 +1991,6 @@ static std::string &llvmStreamableToString(const T &v) {
   strstrm << v;
   strstrm.flush();
   return buf;
-}
-
-bool Runtime::isNativeStackOverflowingSlowPath() {
-#ifdef HERMES_CHECK_NATIVE_STACK
-  auto [highPtr, size] = oscompat::thread_stack_bounds(nativeStackGap_);
-  nativeStackHigh_ = (const char *)highPtr;
-  nativeStackSize_ = size;
-  return LLVM_UNLIKELY(
-      (uintptr_t)nativeStackHigh_ - (uintptr_t)__builtin_frame_address(0) >
-      nativeStackSize_);
-#else
-  return false;
-#endif
 }
 
 /****************************************************************************

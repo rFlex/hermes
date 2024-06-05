@@ -253,7 +253,7 @@ set(HERMES_USE_FLOWPARSER OFF CACHE BOOL
 set(HERMES_ENABLE_WERROR OFF CACHE BOOL
   "Whether the build should have -Werror enabled")
 
-set(HERMES_THREAD_SAFETY_ANALYSIS OFF CACHE BOOL
+set(HERMES_THREAD_SAFETY_ANALYSIS ON CACHE BOOL
   "Whether to compile with clang's -Wthread-safety")
 
 set(HERMES_ENABLE_WIN10_ICU_FALLBACK ON CACHE BOOL
@@ -283,6 +283,9 @@ set(HERMES_BUILD_APPLE_FRAMEWORK ON CACHE BOOL
 
 set(HERMES_BUILD_APPLE_DSYM OFF CACHE BOOL
   "Whether to build a DWARF debugging symbols bundle")
+
+set(IMPORT_HERMESC "" CACHE FILEPATH
+  "Import the hermesc compiler from another build using the given CMake file.")
 
 set(HERMES_BUILD_NODE_HERMES OFF CACHE BOOL "Whether to build node-hermes")
 

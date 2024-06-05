@@ -16,7 +16,7 @@
 
 // lint directives to let us do some basic validation of generated files
 /* eslint no-undef: 'error', no-unused-vars: ['error', {vars: "local"}], no-redeclare: 'error' */
-/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray */
+/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray, $FlowFixMe */
 
 'use strict';
 
@@ -24,6 +24,14 @@
 import type {
   ESNode,
   Token,
+  AFunction,
+  ClassMember,
+  BigIntLiteral,
+  BooleanLiteral,
+  NullLiteral,
+  NumericLiteral,
+  RegExpLiteral,
+  StringLiteral,
   Identifier,
   JSXIdentifier,
   JSXText,
@@ -32,6 +40,7 @@ import type {
   ArrayPattern,
   ArrayTypeAnnotation,
   ArrowFunctionExpression,
+  AsConstExpression,
   AsExpression,
   AssignmentExpression,
   AssignmentPattern,
@@ -65,15 +74,19 @@ import type {
   DeclareExportAllDeclaration,
   DeclareExportDeclaration,
   DeclareFunction,
+  DeclareHook,
   DeclareInterface,
   DeclareModule,
   DeclareModuleExports,
+  DeclareNamespace,
   DeclareOpaqueType,
   DeclareTypeAlias,
   DeclareVariable,
   DoWhileStatement,
   EmptyStatement,
   EmptyTypeAnnotation,
+  EnumBigIntBody,
+  EnumBigIntMember,
   EnumBooleanBody,
   EnumBooleanMember,
   EnumDeclaration,
@@ -97,6 +110,8 @@ import type {
   FunctionTypeAnnotation,
   FunctionTypeParam,
   GenericTypeAnnotation,
+  HookDeclaration,
+  HookTypeAnnotation,
   IfStatement,
   ImportAttribute,
   ImportDeclaration,
@@ -195,7 +210,7 @@ import type {
   LineComment,
   BlockComment,
   MostTokens,
-} from 'hermes-estree';
+} from '../types';
 */
 
 
@@ -236,6 +251,11 @@ export function isArrayTypeAnnotation(node /*: ESNode | Token */) /*: node is Ar
 
 export function isArrowFunctionExpression(node /*: ESNode | Token */) /*: node is ArrowFunctionExpression */ {
   return node.type === 'ArrowFunctionExpression';
+}
+    
+
+export function isAsConstExpression(node /*: ESNode | Token */) /*: node is AsConstExpression */ {
+  return node.type === 'AsConstExpression';
 }
     
 
@@ -404,6 +424,11 @@ export function isDeclareFunction(node /*: ESNode | Token */) /*: node is Declar
 }
     
 
+export function isDeclareHook(node /*: ESNode | Token */) /*: node is DeclareHook */ {
+  return node.type === 'DeclareHook';
+}
+    
+
 export function isDeclareInterface(node /*: ESNode | Token */) /*: node is DeclareInterface */ {
   return node.type === 'DeclareInterface';
 }
@@ -416,6 +441,11 @@ export function isDeclareModule(node /*: ESNode | Token */) /*: node is DeclareM
 
 export function isDeclareModuleExports(node /*: ESNode | Token */) /*: node is DeclareModuleExports */ {
   return node.type === 'DeclareModuleExports';
+}
+    
+
+export function isDeclareNamespace(node /*: ESNode | Token */) /*: node is DeclareNamespace */ {
+  return node.type === 'DeclareNamespace';
 }
     
 
@@ -446,6 +476,16 @@ export function isEmptyStatement(node /*: ESNode | Token */) /*: node is EmptySt
 
 export function isEmptyTypeAnnotation(node /*: ESNode | Token */) /*: node is EmptyTypeAnnotation */ {
   return node.type === 'EmptyTypeAnnotation';
+}
+    
+
+export function isEnumBigIntBody(node /*: ESNode | Token */) /*: node is EnumBigIntBody */ {
+  return node.type === 'EnumBigIntBody';
+}
+    
+
+export function isEnumBigIntMember(node /*: ESNode | Token */) /*: node is EnumBigIntMember */ {
+  return node.type === 'EnumBigIntMember';
 }
     
 
@@ -561,6 +601,16 @@ export function isFunctionTypeParam(node /*: ESNode | Token */) /*: node is Func
 
 export function isGenericTypeAnnotation(node /*: ESNode | Token */) /*: node is GenericTypeAnnotation */ {
   return node.type === 'GenericTypeAnnotation';
+}
+    
+
+export function isHookDeclaration(node /*: ESNode | Token */) /*: node is HookDeclaration */ {
+  return node.type === 'HookDeclaration';
+}
+    
+
+export function isHookTypeAnnotation(node /*: ESNode | Token */) /*: node is HookTypeAnnotation */ {
+  return node.type === 'HookTypeAnnotation';
 }
     
 

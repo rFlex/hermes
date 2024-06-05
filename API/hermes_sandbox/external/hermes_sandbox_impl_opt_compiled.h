@@ -43,23 +43,17 @@ void wasm2c_hermes_instantiate(w2c_hermes*, struct w2c_env*, struct w2c_hermes__
 void wasm2c_hermes_free(w2c_hermes*);
 wasm_rt_func_type_t wasm2c_hermes_get_func_type(uint32_t param_count, uint32_t result_count, ...);
 
-/* import: 'env' '__syscall_lstat64' */
-u32 w2c_env_0x5F_syscall_lstat64(struct w2c_env*, u32, u32);
-
-/* import: 'env' '__syscall_newfstatat' */
-u32 w2c_env_0x5F_syscall_newfstatat(struct w2c_env*, u32, u32, u32, u32);
-
-/* import: 'env' '__syscall_stat64' */
-u32 w2c_env_0x5F_syscall_stat64(struct w2c_env*, u32, u32);
-
-/* import: 'env' '__syscall_unlinkat' */
-u32 w2c_env_0x5F_syscall_unlinkat(struct w2c_env*, u32, u32, u32);
-
 /* import: 'env' 'emscripten_notify_memory_growth' */
 void w2c_env_emscripten_notify_memory_growth(struct w2c_env*, u32);
 
 /* import: 'hermes_import' 'getentropy' */
 u32 w2c_hermes__import_getentropy(struct w2c_hermes__import*, u32, u32);
+
+/* import: 'hermes_import' 'test_and_clear_timeout' */
+u32 w2c_hermes__import_test_and_clear_timeout(struct w2c_hermes__import*);
+
+/* import: 'hermes_import' 'test_timeout' */
+u32 w2c_hermes__import_test_timeout(struct w2c_hermes__import*);
 
 /* import: 'wasi_snapshot_preview1' 'clock_time_get' */
 u32 w2c_wasi__snapshot__preview1_clock_time_get(struct w2c_wasi__snapshot__preview1*, u32, u64, u32);
@@ -87,6 +81,9 @@ void w2c_wasi__snapshot__preview1_proc_exit(struct w2c_wasi__snapshot__preview1*
 
 /* export: 'memory' */
 wasm_rt_memory_t* w2c_hermes_memory(w2c_hermes* instance);
+
+/* export: 'get_global_base' */
+u32 w2c_hermes_get_global_base(w2c_hermes*);
 
 /* export: 'get_hermes_abi_vtable' */
 u32 w2c_hermes_get_hermes_abi_vtable(w2c_hermes*);

@@ -17,7 +17,7 @@
 
 // lint directives to let us do some basic validation of generated files
 /* eslint no-undef: 'error', no-unused-vars: ['error', {vars: "local"}], no-redeclare: 'error' */
-/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray */
+/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray, $FlowFixMe */
 
 'use strict';
 
@@ -34,6 +34,7 @@ module.exports = {
     'returnType',
     'predicate',
   ],
+  AsConstExpression: ['expression'],
   AsExpression: ['expression', 'typeAnnotation'],
   AssignmentExpression: ['left', 'right'],
   AssignmentPattern: ['left', 'right'],
@@ -101,15 +102,19 @@ module.exports = {
   DeclareExportAllDeclaration: ['source'],
   DeclareExportDeclaration: ['declaration', 'specifiers', 'source'],
   DeclareFunction: ['id', 'predicate'],
+  DeclareHook: ['id'],
   DeclareInterface: ['id', 'typeParameters', 'extends', 'body'],
   DeclareModule: ['id', 'body'],
   DeclareModuleExports: ['typeAnnotation'],
+  DeclareNamespace: ['id', 'body'],
   DeclareOpaqueType: ['id', 'typeParameters', 'impltype', 'supertype'],
   DeclareTypeAlias: ['id', 'typeParameters', 'right'],
   DeclareVariable: ['id'],
   DoWhileStatement: ['body', 'test'],
   EmptyStatement: [],
   EmptyTypeAnnotation: [],
+  EnumBigIntBody: ['members'],
+  EnumBigIntMember: ['id', 'init'],
   EnumBooleanBody: ['members'],
   EnumBooleanMember: ['id', 'init'],
   EnumDeclaration: ['id', 'body'],
@@ -153,6 +158,8 @@ module.exports = {
   ],
   FunctionTypeParam: ['name', 'typeAnnotation'],
   GenericTypeAnnotation: ['id', 'typeParameters'],
+  HookDeclaration: ['id', 'params', 'body', 'typeParameters', 'returnType'],
+  HookTypeAnnotation: ['params', 'returnType', 'rest', 'typeParameters'],
   Identifier: ['typeAnnotation'],
   IfStatement: ['test', 'consequent', 'alternate'],
   ImportAttribute: ['key', 'value'],

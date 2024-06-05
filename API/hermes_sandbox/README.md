@@ -18,15 +18,15 @@ cmake -S <path to hermes> -B build_wasm_dbg \
   -DIMPORT_HERMESC=build_host/ImportHermesc.cmake \
   -DCMAKE_BUILD_TYPE=Debug -DHERMES_UNICODE_LITE=ON \
   -DCMAKE_CXX_FLAGS=-O2  -DCMAKE_C_FLAGS=-O2 \
-  -DCMAKE_EXE_LINKER_FLAGS="-sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=256KB" \
+  -DCMAKE_EXE_LINKER_FLAGS="-sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=256KB -sGLOBAL_BASE=16384" \
   -DHERMES_ENABLE_DEBUGGER=OFF -DHERMES_SLOW_DEBUG=OFF \
-  -G Ninja
+  -DHERMES_IS_MOBILE_BUILD=ON -G Ninja
 ```
 
 Then generate the C artefact by running the following:
 ```
 cmake --build build_wasm_dbg --target hermesSandboxImpl \
-  && wasm2c build_wasm_dbg/API/hermes_sandbox/hermesSandboxImpl.wasm -n hermes \
+  && wasm2c build_wasm_dbg/API/hermes_sandbox/hermesSandboxImpl.wasm -n hermes --num-outputs 8 \
      -o <path to hermes>/API/hermes_sandbox/external/hermes_sandbox_impl_dbg_compiled.c
 ```
 
@@ -36,11 +36,11 @@ cmake -S <path to hermes> -B build_wasm_opt \
   -DCMAKE_TOOLCHAIN_FILE=<path to emsdk>/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake \
   -DIMPORT_HERMESC=build_host/ImportHermesc.cmake \
   -DCMAKE_BUILD_TYPE=Release -DHERMES_UNICODE_LITE=ON \
-  -DCMAKE_EXE_LINKER_FLAGS="-sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=256KB -g2" \
-  -DHERMES_ENABLE_DEBUGGER=OFF -G Ninja
+  -DCMAKE_EXE_LINKER_FLAGS="-sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=256KB -sGLOBAL_BASE=16384 -g2" \
+  -DHERMES_ENABLE_DEBUGGER=OFF -DHERMES_IS_MOBILE_BUILD=ON -G Ninja
 
 cmake --build build_wasm_opt --target hermesSandboxImpl \
-  && wasm2c build_wasm_opt/API/hermes_sandbox/hermesSandboxImpl.wasm -n hermes \
+  && wasm2c build_wasm_opt/API/hermes_sandbox/hermesSandboxImpl.wasm -n hermes --num-outputs 8 \
      -o <path to hermes>/API/hermes_sandbox/external/hermes_sandbox_impl_opt_compiled.c
 ```
 

@@ -189,12 +189,15 @@ export type ESNode =
   | TypeParameterInstantiation
   | ComponentDeclaration
   | ComponentParameter
+  | HookDeclaration
   | EnumDeclaration
   | EnumNumberBody
+  | EnumBigIntBody
   | EnumStringBody
   | EnumStringMember
   | EnumDefaultedMember
   | EnumNumberMember
+  | EnumBigIntMember
   | EnumBooleanBody
   | EnumBooleanMember
   | EnumSymbolBody
@@ -236,11 +239,13 @@ export type Statement =
   | DebuggerStatement
   | DeclareClass
   | DeclareComponent
+  | DeclareHook
   | DeclareVariable
   | DeclareEnum
   | DeclareFunction
   | DeclareInterface
   | DeclareModule
+  | DeclareNamespace
   | DeclareOpaqueType
   | DeclareTypeAlias
   | DoWhileStatement
@@ -251,6 +256,7 @@ export type Statement =
   | ForOfStatement
   | ForStatement
   | FunctionDeclaration
+  | HookDeclaration
   | IfStatement
   | InterfaceDeclaration
   | LabeledStatement
@@ -402,6 +408,15 @@ export interface ComponentDeclaration extends BaseNode {
   +typeParameters: null | TypeParameterDeclaration;
 }
 
+export interface HookDeclaration extends BaseNode {
+  +type: 'HookDeclaration';
+  +id: Identifier;
+  +body: BlockStatement;
+  +params: $ReadOnlyArray<FunctionParameter>;
+  +returnType: null | TypeAnnotation;
+  +typeParameters: null | TypeParameterDeclaration;
+}
+
 export interface FunctionDeclaration extends BaseFunction {
   +type: 'FunctionDeclaration';
   /** It is null when a function declaration is a part of the `export default function` statement */
@@ -452,6 +467,7 @@ export type Expression =
   | ChainExpression
   | TypeCastExpression
   | AsExpression
+  | AsConstExpression
   | JSXFragment
   | JSXElement;
 
@@ -1048,7 +1064,8 @@ export interface ImportNamespaceSpecifier extends BaseNode {
 export type DefaultDeclaration =
   | FunctionDeclaration
   | ClassDeclaration
-  | ComponentDeclaration;
+  | ComponentDeclaration
+  | HookDeclaration;
 export type NamedDeclaration =
   | DefaultDeclaration
   | VariableDeclaration
@@ -1144,6 +1161,7 @@ export type TypeAnnotationType =
   | TypeOperator
   | TypePredicate
   | FunctionTypeAnnotation
+  | HookTypeAnnotation
   | ComponentTypeAnnotation
   | ObjectTypeAnnotation
   | IndexedAccessType
@@ -1271,6 +1289,7 @@ export interface KeyofTypeAnnotation extends BaseNode {
 export interface TupleTypeAnnotation extends BaseNode {
   +type: 'TupleTypeAnnotation';
   +types: $ReadOnlyArray<TypeAnnotationType>;
+  +inexact: boolean;
 }
 export interface TupleTypeSpreadElement extends BaseNode {
   +type: 'TupleTypeSpreadElement';
@@ -1354,7 +1373,7 @@ export interface TypePredicate extends BaseNode {
   +type: 'TypePredicate';
   +parameterName: Identifier;
   +typeAnnotation: TypeAnnotationType | null;
-  +asserts: boolean;
+  +kind: null | 'asserts' | 'implies';
 }
 
 export interface FunctionTypeAnnotation extends BaseNode {
@@ -1372,6 +1391,13 @@ export interface FunctionTypeParam extends BaseNode {
   +optional: boolean;
 
   +parent: FunctionTypeAnnotation;
+}
+export interface HookTypeAnnotation extends BaseNode {
+  +type: 'HookTypeAnnotation';
+  +params: $ReadOnlyArray<FunctionTypeParam>;
+  +returnType: TypeAnnotationType;
+  +rest: null | FunctionTypeParam;
+  +typeParameters: null | TypeParameterDeclaration;
 }
 
 export interface ComponentTypeAnnotation extends BaseNode {
@@ -1514,6 +1540,10 @@ export interface AsExpression extends BaseNode {
   +expression: Expression;
   +typeAnnotation: TypeAnnotationType;
 }
+export interface AsConstExpression extends BaseNode {
+  +type: 'AsConstExpression';
+  +expression: Expression;
+}
 
 interface BaseInterfaceNode extends BaseNode {
   +body: ObjectTypeAnnotation;
@@ -1530,7 +1560,7 @@ export interface InterfaceDeclaration extends BaseInterfaceDeclaration {
 
 export interface InterfaceExtends extends BaseNode {
   +type: 'InterfaceExtends';
-  +id: Identifier;
+  +id: Identifier | QualifiedTypeIdentifier;
   +typeParameters: null | TypeParameterInstantiation;
 
   +parent: InterfaceDeclaration | DeclareInterface;
@@ -1574,7 +1604,12 @@ export interface TypeParameterInstantiation extends BaseNode {
 export interface EnumDeclaration extends BaseNode {
   +type: 'EnumDeclaration';
   +id: Identifier;
-  +body: EnumNumberBody | EnumStringBody | EnumBooleanBody | EnumSymbolBody;
+  +body:
+    | EnumNumberBody
+    | EnumBigIntBody
+    | EnumStringBody
+    | EnumBooleanBody
+    | EnumSymbolBody;
 }
 
 interface BaseEnumBody extends BaseNode {
@@ -1599,6 +1634,23 @@ export interface EnumNumberMember extends BaseNode {
   +init: NumericLiteral;
 
   +parent: EnumNumberBody;
+}
+
+export interface EnumBigIntBody extends BaseInferrableEnumBody {
+  +type: 'EnumBigIntBody';
+  // enum bigint members cannot be defaulted
+  +members: $ReadOnlyArray<EnumBigIntMember>;
+  +explicitType: boolean;
+
+  +parent: EnumDeclaration;
+}
+
+export interface EnumBigIntMember extends BaseNode {
+  +type: 'EnumBigIntMember';
+  +id: Identifier;
+  +init: BigIntLiteral;
+
+  +parent: EnumBigIntBody;
 }
 
 export interface EnumStringBody extends BaseInferrableEnumBody {
@@ -1654,6 +1706,7 @@ export interface EnumDefaultedMember extends BaseNode {
 export type DeclaredNode =
   | DeclareClass
   | DeclareComponent
+  | DeclareHook
   | DeclareVariable
   | DeclareEnum
   | DeclareFunction
@@ -1685,6 +1738,16 @@ export interface DeclareComponent extends BaseNode {
   +rendersType: null | RendersType;
 }
 
+export interface DeclareHook extends BaseNode {
+  +type: 'DeclareHook';
+  // the hook signature is stored as a type annotation on the ID
+  +id: interface extends Identifier {
+    +typeAnnotation: interface extends TypeAnnotation {
+      +typeAnnotation: HookTypeAnnotation,
+    },
+  };
+}
+
 export interface DeclareVariable extends BaseNode {
   +type: 'DeclareVariable';
   +id: Identifier;
@@ -1712,7 +1775,12 @@ export interface DeclareModule extends BaseNode {
   +type: 'DeclareModule';
   +id: StringLiteral | Identifier;
   +body: BlockStatement;
-  +kind: 'CommonJS' | 'ES';
+}
+
+export interface DeclareNamespace extends BaseNode {
+  +type: 'DeclareNamespace';
+  +id: Identifier;
+  +body: BlockStatement;
 }
 
 export interface DeclareInterface extends BaseInterfaceDeclaration {
@@ -1746,6 +1814,7 @@ export interface DeclareExportDefaultDeclaration
     | DeclareClass
     | DeclareFunction
     | DeclareComponent
+    | DeclareHook
     | TypeAnnotationType;
   +default: true;
   // default cannot have a source
@@ -1760,6 +1829,7 @@ export interface DeclareExportDeclarationNamedWithDeclaration
     | DeclareClass
     | DeclareFunction
     | DeclareComponent
+    | DeclareHook
     | DeclareInterface
     | DeclareOpaqueType
     | DeclareVariable

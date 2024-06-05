@@ -17,7 +17,7 @@
 
 // lint directives to let us do some basic validation of generated files
 /* eslint no-undef: 'error', no-unused-vars: ['error', {vars: "local"}], no-redeclare: 'error' */
-/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray */
+/* global $NonMaybeType, Partial, $ReadOnly, $ReadOnlyArray, $FlowFixMe */
 
 'use strict';
 
@@ -91,6 +91,18 @@ function deserializeComponentDeclaration() {
     body: this.deserializeNode(),
     typeParameters: this.deserializeNode(),
     rendersType: this.deserializeNode(),
+  };
+}
+
+function deserializeHookDeclaration() {
+  return {
+    type: 'HookDeclaration',
+    loc: this.addEmptyLoc(),
+    id: this.deserializeNode(),
+    params: this.deserializeNodeList(),
+    body: this.deserializeNode(),
+    typeParameters: this.deserializeNode(),
+    returnType: this.deserializeNode(),
   };
 }
 
@@ -968,6 +980,16 @@ function deserializeFunctionTypeAnnotation() {
     typeParameters: this.deserializeNode(),
   };
 }
+function deserializeHookTypeAnnotation() {
+  return {
+    type: 'HookTypeAnnotation',
+    loc: this.addEmptyLoc(),
+    params: this.deserializeNodeList(),
+    returnType: this.deserializeNode(),
+    rest: this.deserializeNode(),
+    typeParameters: this.deserializeNode(),
+  };
+}
 function deserializeFunctionTypeParam() {
   return {
     type: 'FunctionTypeParam',
@@ -1048,6 +1070,7 @@ function deserializeTupleTypeAnnotation() {
     type: 'TupleTypeAnnotation',
     loc: this.addEmptyLoc(),
     types: this.deserializeNodeList(),
+    inexact: this.deserializeBoolean(),
   };
 }
 function deserializeTupleTypeSpreadElement() {
@@ -1137,7 +1160,7 @@ function deserializeTypePredicate() {
     loc: this.addEmptyLoc(),
     parameterName: this.deserializeNode(),
     typeAnnotation: this.deserializeNode(),
-    asserts: this.deserializeBoolean(),
+    kind: this.deserializeString(),
   };
 }
 function deserializeInterfaceTypeAnnotation() {
@@ -1226,6 +1249,13 @@ function deserializeDeclareFunction() {
     predicate: this.deserializeNode(),
   };
 }
+function deserializeDeclareHook() {
+  return {
+    type: 'DeclareHook',
+    loc: this.addEmptyLoc(),
+    id: this.deserializeNode(),
+  };
+}
 function deserializeDeclareComponent() {
   return {
     type: 'DeclareComponent',
@@ -1276,7 +1306,14 @@ function deserializeDeclareModule() {
     loc: this.addEmptyLoc(),
     id: this.deserializeNode(),
     body: this.deserializeNode(),
-    kind: this.deserializeString(),
+  };
+}
+function deserializeDeclareNamespace() {
+  return {
+    type: 'DeclareNamespace',
+    loc: this.addEmptyLoc(),
+    id: this.deserializeNode(),
+    body: this.deserializeNode(),
   };
 }
 function deserializeDeclareModuleExports() {
@@ -1432,6 +1469,13 @@ function deserializeAsExpression() {
     typeAnnotation: this.deserializeNode(),
   };
 }
+function deserializeAsConstExpression() {
+  return {
+    type: 'AsConstExpression',
+    loc: this.addEmptyLoc(),
+    expression: this.deserializeNode(),
+  };
+}
 function deserializeInferredPredicate() {
   return {type: 'InferredPredicate', loc: this.addEmptyLoc()};
 }
@@ -1462,6 +1506,15 @@ function deserializeEnumStringBody() {
 function deserializeEnumNumberBody() {
   return {
     type: 'EnumNumberBody',
+    loc: this.addEmptyLoc(),
+    members: this.deserializeNodeList(),
+    explicitType: this.deserializeBoolean(),
+    hasUnknownMembers: this.deserializeBoolean(),
+  };
+}
+function deserializeEnumBigIntBody() {
+  return {
+    type: 'EnumBigIntBody',
     loc: this.addEmptyLoc(),
     members: this.deserializeNodeList(),
     explicitType: this.deserializeBoolean(),
@@ -1503,6 +1556,14 @@ function deserializeEnumStringMember() {
 function deserializeEnumNumberMember() {
   return {
     type: 'EnumNumberMember',
+    loc: this.addEmptyLoc(),
+    id: this.deserializeNode(),
+    init: this.deserializeNode(),
+  };
+}
+function deserializeEnumBigIntMember() {
+  return {
+    type: 'EnumBigIntMember',
     loc: this.addEmptyLoc(),
     id: this.deserializeNode(),
     init: this.deserializeNode(),
@@ -1902,6 +1963,8 @@ module.exports = [
 
   deserializeComponentDeclaration,
 
+  deserializeHookDeclaration,
+
   deserializeFunctionLikeLast,
   deserializeStatementFirst,
   deserializeLoopStatementFirst,
@@ -2036,6 +2099,7 @@ module.exports = [
   deserializeBigIntTypeAnnotation,
   deserializeVoidTypeAnnotation,
   deserializeFunctionTypeAnnotation,
+  deserializeHookTypeAnnotation,
   deserializeFunctionTypeParam,
   deserializeComponentTypeAnnotation,
   deserializeComponentTypeParameter,
@@ -2067,12 +2131,14 @@ module.exports = [
   deserializeDeclareInterface,
   deserializeDeclareClass,
   deserializeDeclareFunction,
+  deserializeDeclareHook,
   deserializeDeclareComponent,
   deserializeDeclareVariable,
   deserializeDeclareEnum,
   deserializeDeclareExportDeclaration,
   deserializeDeclareExportAllDeclaration,
   deserializeDeclareModule,
+  deserializeDeclareNamespace,
   deserializeDeclareModuleExports,
   deserializeInterfaceExtends,
   deserializeClassImplements,
@@ -2091,16 +2157,19 @@ module.exports = [
   deserializeTypeParameterInstantiation,
   deserializeTypeCastExpression,
   deserializeAsExpression,
+  deserializeAsConstExpression,
   deserializeInferredPredicate,
   deserializeDeclaredPredicate,
   deserializeEnumDeclaration,
   deserializeEnumStringBody,
   deserializeEnumNumberBody,
+  deserializeEnumBigIntBody,
   deserializeEnumBooleanBody,
   deserializeEnumSymbolBody,
   deserializeEnumDefaultedMember,
   deserializeEnumStringMember,
   deserializeEnumNumberMember,
+  deserializeEnumBigIntMember,
   deserializeEnumBooleanMember,
   deserializeComponentParameter,
   deserializeFlowLast,
